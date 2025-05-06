@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import {
   Search,
   Filter,
@@ -8,6 +8,8 @@ import {
   ChevronDown,
   ChevronUp,
   UserCircle,
+  Loader2,
+  AlertCircle,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -32,6 +34,8 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Separator } from "@/components/ui/separator";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { useSupabaseData, updateSupabaseRecord } from "@/hooks/useSupabaseData";
 
 interface Customer {
   id: string;
@@ -62,93 +66,77 @@ const CustomerManagement = () => {
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
 
-  // Mock data for customers
-  const customers: Customer[] = [
-    {
-      id: "1",
-      name: "John Smith",
-      email: "john.smith@example.com",
-      phone: "(555) 123-4567",
-      address: "123 Main St, Anytown, AN 12345",
-      joinDate: "2023-01-15",
-      orderCount: 24,
-      status: "active",
-    },
-    {
-      id: "2",
-      name: "Sarah Johnson",
-      email: "sarah.j@example.com",
-      phone: "(555) 987-6543",
-      address: "456 Oak Ave, Somewhere, SM 67890",
-      joinDate: "2023-02-20",
-      orderCount: 18,
-      status: "active",
-    },
-    {
-      id: "3",
-      name: "Michael Brown",
-      email: "michael.b@example.com",
-      phone: "(555) 456-7890",
-      address: "789 Pine Rd, Elsewhere, EL 54321",
-      joinDate: "2023-03-10",
-      orderCount: 12,
-      status: "inactive",
-    },
-    {
-      id: "4",
-      name: "Emily Davis",
-      email: "emily.d@example.com",
-      phone: "(555) 234-5678",
-      address: "321 Cedar Ln, Nowhere, NW 13579",
-      joinDate: "2023-04-05",
-      orderCount: 30,
-      status: "active",
-    },
-    {
-      id: "5",
-      name: "Robert Wilson",
-      email: "robert.w@example.com",
-      phone: "(555) 876-5432",
-      address: "654 Birch St, Anywhere, AW 97531",
-      joinDate: "2023-05-12",
-      orderCount: 6,
-      status: "inactive",
-    },
-  ];
+  // Fetch customers from Supabase
+  const {
+    data: supabaseCustomers,
+    loading,
+    error,
+    count: totalCustomers,
+  } = useSupabaseData<Customer>({
+    table: "customers",
+    columns:
+      "*, (SELECT COUNT(*) FROM orders WHERE customer_id = customers.id) as order_count",
+    orderBy: { column: sortField, ascending: sortDirection === "asc" },
+  });
 
-  // Mock data for orders
-  const customerOrders: Order[] = [
-    {
-      id: "ORD-001",
-      date: "2023-06-15",
-      products: [
-        { name: "Whole Milk", quantity: 2, price: 3.99 },
-        { name: "Yogurt", quantity: 3, price: 1.99 },
-      ],
-      total: 13.95,
-      status: "delivered",
-    },
-    {
-      id: "ORD-002",
-      date: "2023-06-22",
-      products: [
-        { name: "Whole Milk", quantity: 2, price: 3.99 },
-        { name: "Butter", quantity: 1, price: 4.5 },
-      ],
-      total: 12.48,
-      status: "delivered",
-    },
-    {
-      id: "ORD-003",
-      date: "2023-06-29",
-      products: [
-        { name: "Whole Milk", quantity: 2, price: 3.99 },
-        { name: "Cheese", quantity: 1, price: 5.99 },
-      ],
-      total: 13.97,
-      status: "pending",
-    },
-  ];
+  // Transform Supabase data to match our Customer interface
+  const customers = supabaseCustomers.map((customer: any) => ({
+    id: customer.id,
+    name: customer.name || "Unknown",
+    email: customer.email || "Unknown",
+    phone: customer.phone || "Unknown",
+    address: customer.address || "Unknown",
+    joinDate: customer.created_at || new Date().toISOString(),
+    orderCount: customer.order_count || 0,
+    status: customer.status || "inactive",
+  }));
+
+  // State for customer orders
+  const [customerOrders, setCustomerOrders] = useState<Order[]>([]);
+  const [loadingOrders, setLoadingOrders] = useState(false);
+  const [ordersError, setOrdersError] = useState<string | null>(null);
+
+  // Fetch customer orders when a customer is selected
+  useEffect(() => {
+    const fetchCustomerOrders = async () => {
+      if (!selectedCustomer) return;
+
+      setLoadingOrders(true);
+      setOrdersError(null);
+
+      try {
+        const { data: ordersData, error } = await supabase
+          .from("orders")
+          .select("*, order_items(*, products(*))")
+          .eq("customer_id", selectedCustomer.id);
+
+        if (error) throw error;
+
+        // Transform orders data
+        const transformedOrders = ordersData.map((order: any) => ({
+          id: order.id,
+          date: order.delivery_date,
+          products:
+            order.order_items?.map((item: any) => ({
+              name: item.products?.name || "Unknown Product",
+              quantity: item.quantity,
+              price: item.price,
+            })) || [],
+          total: order.total_amount,
+          status: order.order_status,
+        }));
+
+        setCustomerOrders(transformedOrders);
+      } catch (error) {
+        console.error("Error fetching customer orders:", error);
+        setOrdersError("Failed to load customer orders");
+      } finally {
+        setLoadingOrders(false);
+      }
+    };
+
+    fetchCustomerOrders();
+  }, [selectedCustomer]);
 
   // Filter customers based on search term
   const filteredCustomers = customers.filter(
@@ -204,7 +192,9 @@ const CustomerManagement = () => {
   return (
     <div className="bg-background p-6 h-full">
       <div className="flex justify-between items-center mb-6">
-        <h1 className="text-2xl font-bold">Customer Management</h1>
+        <h1 className="text-2xl font-bold">
+          Customer Management {totalCustomers !== null && `(${totalCustomers})`}
+        </h1>
         <Button>
           <Filter className="h-4 w-4 mr-2" />
           Advanced Filters
@@ -226,103 +216,134 @@ const CustomerManagement = () => {
           <CardTitle>Customers ({filteredCustomers.length})</CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="rounded-md border">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead
-                    className="cursor-pointer"
-                    onClick={() => handleSort("name")}
-                  >
-                    <div className="flex items-center">
-                      Name {renderSortIndicator("name")}
-                    </div>
-                  </TableHead>
-                  <TableHead
-                    className="cursor-pointer"
-                    onClick={() => handleSort("email")}
-                  >
-                    <div className="flex items-center">
-                      Email {renderSortIndicator("email")}
-                    </div>
-                  </TableHead>
-                  <TableHead>Phone</TableHead>
-                  <TableHead
-                    className="cursor-pointer"
-                    onClick={() => handleSort("orderCount")}
-                  >
-                    <div className="flex items-center">
-                      Orders {renderSortIndicator("orderCount")}
-                    </div>
-                  </TableHead>
-                  <TableHead
-                    className="cursor-pointer"
-                    onClick={() => handleSort("status")}
-                  >
-                    <div className="flex items-center">
-                      Status {renderSortIndicator("status")}
-                    </div>
-                  </TableHead>
-                  <TableHead className="text-right">Actions</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {sortedCustomers.length > 0 ? (
-                  sortedCustomers.map((customer) => (
-                    <TableRow
-                      key={customer.id}
-                      className="cursor-pointer hover:bg-muted/50"
+          {/* Loading and Error States */}
+          {loading && (
+            <div className="flex justify-center items-center py-8">
+              <Loader2 className="h-8 w-8 animate-spin text-primary" />
+              <span className="ml-2">Loading customers...</span>
+            </div>
+          )}
+
+          {error && (
+            <Alert variant="destructive" className="mb-4">
+              <AlertCircle className="h-4 w-4" />
+              <AlertDescription>
+                Error loading customers: {error}
+              </AlertDescription>
+            </Alert>
+          )}
+
+          {!loading && !error && (
+            <div className="rounded-md border">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead
+                      className="cursor-pointer"
+                      onClick={() => handleSort("name")}
                     >
-                      <TableCell onClick={() => handleCustomerSelect(customer)}>
-                        <div className="font-medium">{customer.name}</div>
-                      </TableCell>
-                      <TableCell onClick={() => handleCustomerSelect(customer)}>
-                        {customer.email}
-                      </TableCell>
-                      <TableCell onClick={() => handleCustomerSelect(customer)}>
-                        {customer.phone}
-                      </TableCell>
-                      <TableCell onClick={() => handleCustomerSelect(customer)}>
-                        {customer.orderCount}
-                      </TableCell>
-                      <TableCell onClick={() => handleCustomerSelect(customer)}>
-                        <Badge
-                          variant={
-                            customer.status === "active" ? "default" : "outline"
-                          }
+                      <div className="flex items-center">
+                        Name {renderSortIndicator("name")}
+                      </div>
+                    </TableHead>
+                    <TableHead
+                      className="cursor-pointer"
+                      onClick={() => handleSort("email")}
+                    >
+                      <div className="flex items-center">
+                        Email {renderSortIndicator("email")}
+                      </div>
+                    </TableHead>
+                    <TableHead>Phone</TableHead>
+                    <TableHead
+                      className="cursor-pointer"
+                      onClick={() => handleSort("orderCount")}
+                    >
+                      <div className="flex items-center">
+                        Orders {renderSortIndicator("orderCount")}
+                      </div>
+                    </TableHead>
+                    <TableHead
+                      className="cursor-pointer"
+                      onClick={() => handleSort("status")}
+                    >
+                      <div className="flex items-center">
+                        Status {renderSortIndicator("status")}
+                      </div>
+                    </TableHead>
+                    <TableHead className="text-right">Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {sortedCustomers.length > 0 ? (
+                    sortedCustomers.map((customer) => (
+                      <TableRow
+                        key={customer.id}
+                        className="cursor-pointer hover:bg-muted/50"
+                      >
+                        <TableCell
+                          onClick={() => handleCustomerSelect(customer)}
                         >
-                          {customer.status}
-                        </Badge>
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <div className="flex justify-end space-x-2">
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={() => handleCustomerEdit(customer)}
+                          <div className="font-medium">{customer.name}</div>
+                        </TableCell>
+                        <TableCell
+                          onClick={() => handleCustomerSelect(customer)}
+                        >
+                          {customer.email}
+                        </TableCell>
+                        <TableCell
+                          onClick={() => handleCustomerSelect(customer)}
+                        >
+                          {customer.phone}
+                        </TableCell>
+                        <TableCell
+                          onClick={() => handleCustomerSelect(customer)}
+                        >
+                          {customer.orderCount}
+                        </TableCell>
+                        <TableCell
+                          onClick={() => handleCustomerSelect(customer)}
+                        >
+                          <Badge
+                            variant={
+                              customer.status === "active"
+                                ? "default"
+                                : "outline"
+                            }
                           >
-                            <Edit className="h-4 w-4" />
-                          </Button>
-                          <Button variant="ghost" size="icon">
-                            <MoreVertical className="h-4 w-4" />
-                          </Button>
-                        </div>
+                            {customer.status}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <div className="flex justify-end space-x-2">
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              onClick={() => handleCustomerEdit(customer)}
+                            >
+                              <Edit className="h-4 w-4" />
+                            </Button>
+                            <Button variant="ghost" size="icon">
+                              <MoreVertical className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    ))
+                  ) : (
+                    <TableRow>
+                      <TableCell
+                        colSpan={6}
+                        className="text-center py-8 text-muted-foreground"
+                      >
+                        No customers found
                       </TableCell>
                     </TableRow>
-                  ))
-                ) : (
-                  <TableRow>
-                    <TableCell
-                      colSpan={6}
-                      className="text-center py-8 text-muted-foreground"
-                    >
-                      No customers found
-                    </TableCell>
-                  </TableRow>
-                )}
-              </TableBody>
-            </Table>
-          </div>
+                  )}
+                </TableBody>
+              </Table>
+            </div>
+          )}
         </CardContent>
       </Card>
 
@@ -457,7 +478,23 @@ const CustomerManagement = () => {
                     <div className="space-y-4">
                       <h4 className="text-sm font-medium">Recent Orders</h4>
 
-                      {customerOrders.length > 0 ? (
+                      {loadingOrders && (
+                        <div className="flex justify-center items-center py-4">
+                          <Loader2 className="h-6 w-6 animate-spin text-primary" />
+                          <span className="ml-2">Loading orders...</span>
+                        </div>
+                      )}
+
+                      {ordersError && (
+                        <Alert variant="destructive" className="mb-4">
+                          <AlertCircle className="h-4 w-4" />
+                          <AlertDescription>{ordersError}</AlertDescription>
+                        </Alert>
+                      )}
+
+                      {!loadingOrders &&
+                      !ordersError &&
+                      customerOrders.length > 0 ? (
                         <div className="rounded-md border">
                           <Table>
                             <TableHeader>
@@ -662,7 +699,31 @@ const CustomerManagement = () => {
               >
                 Cancel
               </Button>
-              <Button onClick={() => setIsEditDialogOpen(false)}>
+              <Button
+                onClick={async () => {
+                  if (selectedCustomer) {
+                    try {
+                      // Map to Supabase format
+                      const supabaseData = {
+                        name: selectedCustomer.name,
+                        email: selectedCustomer.email,
+                        phone: selectedCustomer.phone,
+                        address: selectedCustomer.address,
+                        status: selectedCustomer.status,
+                      };
+
+                      await updateSupabaseRecord(
+                        "customers",
+                        selectedCustomer.id,
+                        supabaseData,
+                      );
+                      setIsEditDialogOpen(false);
+                    } catch (error) {
+                      console.error("Error updating customer:", error);
+                    }
+                  }
+                }}
+              >
                 Save Changes
               </Button>
             </DialogFooter>

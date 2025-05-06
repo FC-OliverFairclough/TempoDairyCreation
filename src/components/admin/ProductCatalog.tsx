@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import {
   PlusCircle,
   Pencil,
@@ -6,6 +6,8 @@ import {
   Search,
   Filter,
   ArrowUpDown,
+  Loader2,
+  AlertCircle,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -42,6 +44,14 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import {
+  useSupabaseData,
+  createSupabaseRecord,
+  updateSupabaseRecord,
+  deleteSupabaseRecord,
+} from "@/hooks/useSupabaseData";
+import { supabase } from "@/lib/supabase";
 
 interface Product {
   id: string;
@@ -55,68 +65,43 @@ interface Product {
 }
 
 const ProductCatalog = () => {
-  // Mock data for products
-  const [products, setProducts] = useState<Product[]>([
-    {
-      id: "1",
-      name: "Whole Milk",
-      description: "Fresh whole milk from local farms",
-      price: 2.99,
-      category: "Milk",
-      available: true,
-      stock: 50,
-      image:
-        "https://images.unsplash.com/photo-1563636619-e9143da7973b?w=400&q=80",
-    },
-    {
-      id: "2",
-      name: "Skimmed Milk",
-      description: "Low-fat skimmed milk",
-      price: 2.49,
-      category: "Milk",
-      available: true,
-      stock: 45,
-      image:
-        "https://images.unsplash.com/photo-1550583724-b2692b85b150?w=400&q=80",
-    },
-    {
-      id: "3",
-      name: "Butter",
-      description: "Creamy farm-fresh butter",
-      price: 3.99,
-      category: "Dairy",
-      available: true,
-      stock: 30,
-      image:
-        "https://images.unsplash.com/photo-1589985270826-4b7bb135bc9d?w=400&q=80",
-    },
-    {
-      id: "4",
-      name: "Yogurt",
-      description: "Natural plain yogurt",
-      price: 1.99,
-      category: "Dairy",
-      available: true,
-      stock: 40,
-      image:
-        "https://images.unsplash.com/photo-1584278860047-22db9ff82bed?w=400&q=80",
-    },
-    {
-      id: "5",
-      name: "Cheese",
-      description: "Artisan cheddar cheese",
-      price: 4.99,
-      category: "Dairy",
-      available: false,
-      stock: 0,
-      image:
-        "https://images.unsplash.com/photo-1589881133595-a3c085cb731d?w=400&q=80",
-    },
-  ]);
-
   // State for search and filter
   const [searchTerm, setSearchTerm] = useState("");
   const [showUnavailable, setShowUnavailable] = useState(true);
+
+  // Fetch products from Supabase
+  const {
+    data: supabaseProducts,
+    loading,
+    error,
+    count: totalProducts,
+  } = useSupabaseData<Product>({
+    table: "products",
+    columns: "*",
+    filters: showUnavailable ? {} : { available: true },
+    orderBy: { column: "name", ascending: true },
+  });
+
+  // Local state for products (used for optimistic UI updates)
+  const [products, setProducts] = useState<Product[]>([]);
+
+  // Update local state when Supabase data changes
+  useEffect(() => {
+    if (supabaseProducts) {
+      // Transform Supabase data to match our Product interface
+      const transformedProducts = supabaseProducts.map((product: any) => ({
+        id: product.id,
+        name: product.name,
+        description: product.description,
+        price: product.price,
+        category: product.category,
+        available: product.available,
+        stock: product.stock,
+        image: product.image_url,
+      }));
+      setProducts(transformedProducts);
+    }
+  }, [supabaseProducts]);
 
   // State for product form (add/edit)
   const [isDialogOpen, setIsDialogOpen] = useState(false);
@@ -163,49 +148,81 @@ const ProductCatalog = () => {
   };
 
   // Handle saving a product (add or edit)
-  const handleSaveProduct = () => {
+  const handleSaveProduct = async () => {
     if (!currentProduct) return;
 
-    if (isEditing) {
-      // Update existing product
-      setProducts(
-        products.map((p) => (p.id === currentProduct.id ? currentProduct : p)),
-      );
-    } else {
-      // Add new product
-      setProducts([...products, currentProduct]);
-    }
+    try {
+      // Map to Supabase format
+      const supabaseData = {
+        name: currentProduct.name,
+        description: currentProduct.description,
+        price: currentProduct.price,
+        category: currentProduct.category,
+        available: currentProduct.available,
+        stock: currentProduct.stock,
+        image_url: currentProduct.image,
+      };
 
-    setIsDialogOpen(false);
-    setCurrentProduct(null);
+      if (isEditing) {
+        // Update existing product in Supabase
+        await updateSupabaseRecord("products", currentProduct.id, supabaseData);
+      } else {
+        // Add new product to Supabase
+        await createSupabaseRecord("products", supabaseData);
+      }
+
+      setIsDialogOpen(false);
+      setCurrentProduct(null);
+      // Data will refresh automatically via useSupabaseData
+    } catch (error) {
+      console.error("Error saving product:", error);
+      // Could add error handling UI here
+    }
   };
 
   // Handle confirming delete
-  const handleConfirmDelete = () => {
+  const handleConfirmDelete = async () => {
     if (!currentProduct) return;
 
-    setProducts(products.filter((p) => p.id !== currentProduct.id));
-    setIsDeleteDialogOpen(false);
-    setCurrentProduct(null);
+    try {
+      // Delete product from Supabase
+      await deleteSupabaseRecord("products", currentProduct.id);
+
+      setIsDeleteDialogOpen(false);
+      setCurrentProduct(null);
+      // Data will refresh automatically via useSupabaseData
+    } catch (error) {
+      console.error("Error deleting product:", error);
+      // Could add error handling UI here
+    }
   };
 
   // Handle toggling product availability
-  const handleToggleAvailability = (id: string) => {
-    setProducts(
-      products.map((product) => {
-        if (product.id === id) {
-          return { ...product, available: !product.available };
-        }
-        return product;
-      }),
-    );
+  const handleToggleAvailability = async (id: string) => {
+    try {
+      // Find the product
+      const product = products.find((p) => p.id === id);
+      if (!product) return;
+
+      // Update availability in Supabase
+      await updateSupabaseRecord("products", id, {
+        available: !product.available,
+      });
+
+      // Data will refresh automatically via useSupabaseData
+    } catch (error) {
+      console.error("Error toggling product availability:", error);
+      // Could add error handling UI here
+    }
   };
 
   return (
     <div className="bg-white p-6 rounded-lg shadow-sm">
       <Card>
         <CardHeader className="flex flex-row items-center justify-between pb-2">
-          <CardTitle className="text-2xl font-bold">Product Catalog</CardTitle>
+          <CardTitle className="text-2xl font-bold">
+            Product Catalog {totalProducts !== null && `(${totalProducts})`}
+          </CardTitle>
           <Button onClick={handleAddProduct}>
             <PlusCircle className="mr-2 h-4 w-4" /> Add Product
           </Button>
@@ -234,98 +251,117 @@ const ProductCatalog = () => {
             </div>
           </div>
 
-          <div className="rounded-md border">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead className="w-[80px]">Image</TableHead>
-                  <TableHead>
-                    Name <ArrowUpDown className="ml-1 h-4 w-4 inline" />
-                  </TableHead>
-                  <TableHead>Category</TableHead>
-                  <TableHead className="text-right">Price</TableHead>
-                  <TableHead className="text-center">Stock</TableHead>
-                  <TableHead className="text-center">Status</TableHead>
-                  <TableHead className="text-right">Actions</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {filteredProducts.length > 0 ? (
-                  filteredProducts.map((product) => (
-                    <TableRow key={product.id}>
-                      <TableCell>
-                        {product.image ? (
-                          <img
-                            src={product.image}
-                            alt={product.name}
-                            className="h-10 w-10 rounded-md object-cover"
-                          />
-                        ) : (
-                          <div className="h-10 w-10 rounded-md bg-gray-100 flex items-center justify-center text-gray-400">
-                            No img
+          {/* Loading and Error States */}
+          {loading && (
+            <div className="flex justify-center items-center py-8">
+              <Loader2 className="h-8 w-8 animate-spin text-primary" />
+              <span className="ml-2">Loading products...</span>
+            </div>
+          )}
+
+          {error && (
+            <Alert variant="destructive" className="mb-4">
+              <AlertCircle className="h-4 w-4" />
+              <AlertDescription>
+                Error loading products: {error}
+              </AlertDescription>
+            </Alert>
+          )}
+
+          {!loading && !error && (
+            <div className="rounded-md border">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="w-[80px]">Image</TableHead>
+                    <TableHead>
+                      Name <ArrowUpDown className="ml-1 h-4 w-4 inline" />
+                    </TableHead>
+                    <TableHead>Category</TableHead>
+                    <TableHead className="text-right">Price</TableHead>
+                    <TableHead className="text-center">Stock</TableHead>
+                    <TableHead className="text-center">Status</TableHead>
+                    <TableHead className="text-right">Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {filteredProducts.length > 0 ? (
+                    filteredProducts.map((product) => (
+                      <TableRow key={product.id}>
+                        <TableCell>
+                          {product.image ? (
+                            <img
+                              src={product.image}
+                              alt={product.name}
+                              className="h-10 w-10 rounded-md object-cover"
+                            />
+                          ) : (
+                            <div className="h-10 w-10 rounded-md bg-gray-100 flex items-center justify-center text-gray-400">
+                              No img
+                            </div>
+                          )}
+                        </TableCell>
+                        <TableCell className="font-medium">
+                          {product.name}
+                        </TableCell>
+                        <TableCell>
+                          <Badge variant="outline">{product.category}</Badge>
+                        </TableCell>
+                        <TableCell className="text-right">
+                          ${product.price.toFixed(2)}
+                        </TableCell>
+                        <TableCell className="text-center">
+                          {product.stock}
+                        </TableCell>
+                        <TableCell className="text-center">
+                          <div className="flex items-center justify-center">
+                            <Switch
+                              checked={product.available}
+                              onCheckedChange={() =>
+                                handleToggleAvailability(product.id)
+                              }
+                              className="data-[state=checked]:bg-green-500"
+                            />
+                            <span className="ml-2 text-sm">
+                              {product.available ? "Available" : "Unavailable"}
+                            </span>
                           </div>
-                        )}
-                      </TableCell>
-                      <TableCell className="font-medium">
-                        {product.name}
-                      </TableCell>
-                      <TableCell>
-                        <Badge variant="outline">{product.category}</Badge>
-                      </TableCell>
-                      <TableCell className="text-right">
-                        ${product.price.toFixed(2)}
-                      </TableCell>
-                      <TableCell className="text-center">
-                        {product.stock}
-                      </TableCell>
-                      <TableCell className="text-center">
-                        <div className="flex items-center justify-center">
-                          <Switch
-                            checked={product.available}
-                            onCheckedChange={() =>
-                              handleToggleAvailability(product.id)
-                            }
-                            className="data-[state=checked]:bg-green-500"
-                          />
-                          <span className="ml-2 text-sm">
-                            {product.available ? "Available" : "Unavailable"}
-                          </span>
-                        </div>
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <div className="flex justify-end space-x-2">
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => handleEditProduct(product)}
-                          >
-                            <Pencil className="h-4 w-4" />
-                          </Button>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => handleDeleteProduct(product)}
-                            className="text-red-500 hover:text-red-600"
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
-                        </div>
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <div className="flex justify-end space-x-2">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => handleEditProduct(product)}
+                            >
+                              <Pencil className="h-4 w-4" />
+                            </Button>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => handleDeleteProduct(product)}
+                              className="text-red-500 hover:text-red-600"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    ))
+                  ) : (
+                    <TableRow>
+                      <TableCell
+                        colSpan={7}
+                        className="text-center py-6 text-gray-500"
+                      >
+                        No products found. Try adjusting your search or filters.
                       </TableCell>
                     </TableRow>
-                  ))
-                ) : (
-                  <TableRow>
-                    <TableCell
-                      colSpan={7}
-                      className="text-center py-6 text-gray-500"
-                    >
-                      No products found. Try adjusting your search or filters.
-                    </TableCell>
-                  </TableRow>
-                )}
-              </TableBody>
-            </Table>
-          </div>
+                  )}
+                </TableBody>
+              </Table>
+            </div>
+          )}
         </CardContent>
       </Card>
 

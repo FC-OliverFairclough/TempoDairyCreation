@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import {
   Search,
   Filter,
@@ -9,6 +9,8 @@ import {
   Trash2,
   Check,
   X,
+  Loader2,
+  AlertCircle,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -38,6 +40,8 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { useSupabaseData, updateSupabaseRecord } from "@/hooks/useSupabaseData";
 
 interface Order {
   id: string;
@@ -68,84 +72,43 @@ const OrderManagement = () => {
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
 
-  // Mock data for demonstration
-  const orders: Order[] = [
-    {
-      id: "ORD-001",
-      customerName: "John Doe",
-      customerEmail: "john@example.com",
-      customerPhone: "555-123-4567",
-      address: "123 Main St, Anytown, AN 12345",
-      products: [
-        { id: "P1", name: "Whole Milk (1L)", quantity: 2, price: 2.5 },
-        { id: "P2", name: "Butter (250g)", quantity: 1, price: 3.0 },
-      ],
-      total: 8.0,
-      deliveryDate: "2023-06-15",
-      paymentStatus: "paid",
-      orderStatus: "delivered",
-      createdAt: "2023-06-14T10:30:00Z",
-    },
-    {
-      id: "ORD-002",
-      customerName: "Jane Smith",
-      customerEmail: "jane@example.com",
-      customerPhone: "555-987-6543",
-      address: "456 Oak Ave, Somewhere, SM 67890",
-      products: [
-        { id: "P1", name: "Whole Milk (1L)", quantity: 3, price: 2.5 },
-        { id: "P3", name: "Yogurt (500g)", quantity: 2, price: 2.75 },
-      ],
-      total: 13.0,
-      deliveryDate: "2023-06-17",
-      paymentStatus: "pending",
-      orderStatus: "confirmed",
-      createdAt: "2023-06-15T14:45:00Z",
-    },
-    {
-      id: "ORD-003",
-      customerName: "Robert Johnson",
-      customerEmail: "robert@example.com",
-      customerPhone: "555-456-7890",
-      address: "789 Pine Rd, Elsewhere, EL 13579",
-      products: [
-        { id: "P4", name: "Cheese (200g)", quantity: 1, price: 4.5 },
-        { id: "P5", name: "Cream (300ml)", quantity: 1, price: 2.25 },
-      ],
-      total: 6.75,
-      deliveryDate: "2023-06-16",
-      paymentStatus: "paid",
-      orderStatus: "pending",
-      createdAt: "2023-06-15T09:15:00Z",
-    },
-  ];
+  // Fetch orders from Supabase
+  const {
+    data: orders,
+    loading,
+    error,
+    count: totalOrders,
+  } = useSupabaseData<Order>({
+    table: "orders",
+    columns: "*, customers(*)",
+    filters: filterStatus !== "all" ? { order_status: filterStatus } : {},
+    orderBy: { column: sortField, ascending: sortDirection === "asc" },
+  });
 
-  // Filter and sort orders
-  const filteredOrders = orders
-    .filter((order) => {
-      const matchesSearch =
-        order.customerName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        order.id.toLowerCase().includes(searchTerm.toLowerCase());
+  // Transform orders data from Supabase format to component format
+  const transformedOrders = orders.map((order: any) => ({
+    id: order.id,
+    customerName: order.customers?.name || "Unknown",
+    customerEmail: order.customers?.email || "Unknown",
+    customerPhone: order.customers?.phone || "Unknown",
+    address: order.delivery_address || "Unknown",
+    products: order.products || [],
+    total: order.total_amount || 0,
+    deliveryDate: order.delivery_date || new Date().toISOString(),
+    paymentStatus: order.payment_status || "pending",
+    orderStatus: order.order_status || "pending",
+    createdAt: order.created_at || new Date().toISOString(),
+  }));
 
-      const matchesFilter =
-        filterStatus === "all" ||
-        order.orderStatus === filterStatus ||
-        order.paymentStatus === filterStatus;
+  // Filter orders by search term (client-side filtering for search)
+  const filteredOrders = transformedOrders.filter((order) => {
+    const matchesSearch =
+      !searchTerm ||
+      order.customerName.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      order.id.toLowerCase().includes(searchTerm.toLowerCase());
 
-      return matchesSearch && matchesFilter;
-    })
-    .sort((a, b) => {
-      let aValue = a[sortField as keyof Order];
-      let bValue = b[sortField as keyof Order];
-
-      if (typeof aValue === "string" && typeof bValue === "string") {
-        return sortDirection === "asc"
-          ? aValue.localeCompare(bValue)
-          : bValue.localeCompare(aValue);
-      }
-
-      return 0;
-    });
+    return matchesSearch;
+  });
 
   const handleSort = (field: string) => {
     if (sortField === field) {
@@ -164,6 +127,29 @@ const OrderManagement = () => {
   const handleEditOrder = (order: Order) => {
     setSelectedOrder(order);
     setIsEditDialogOpen(true);
+  };
+
+  // Handle saving order changes to Supabase
+  const handleSaveOrderChanges = async (
+    orderId: string,
+    updatedData: Partial<Order>,
+  ) => {
+    try {
+      // Map component data format back to Supabase format
+      const supabaseData = {
+        order_status: updatedData.orderStatus,
+        payment_status: updatedData.paymentStatus,
+        delivery_date: updatedData.deliveryDate,
+      };
+
+      await updateSupabaseRecord("orders", orderId, supabaseData);
+
+      // Close dialog and refresh data (will happen automatically with useSupabaseData)
+      setIsEditDialogOpen(false);
+    } catch (error) {
+      console.error("Error updating order:", error);
+      // Could add error handling UI here
+    }
   };
 
   const handleDeleteOrder = (order: Order) => {
@@ -232,133 +218,154 @@ const OrderManagement = () => {
       {/* Orders Table */}
       <Card>
         <CardHeader className="pb-0">
-          <CardTitle>Orders</CardTitle>
+          <CardTitle>
+            Orders {totalOrders !== null && `(${totalOrders})`}
+          </CardTitle>
         </CardHeader>
         <CardContent>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead
-                  className="cursor-pointer"
-                  onClick={() => handleSort("id")}
-                >
-                  Order ID
-                  {sortField === "id" &&
-                    (sortDirection === "asc" ? (
-                      <ChevronUp size={16} className="inline ml-1" />
-                    ) : (
-                      <ChevronDown size={16} className="inline ml-1" />
-                    ))}
-                </TableHead>
-                <TableHead
-                  className="cursor-pointer"
-                  onClick={() => handleSort("customerName")}
-                >
-                  Customer
-                  {sortField === "customerName" &&
-                    (sortDirection === "asc" ? (
-                      <ChevronUp size={16} className="inline ml-1" />
-                    ) : (
-                      <ChevronDown size={16} className="inline ml-1" />
-                    ))}
-                </TableHead>
-                <TableHead
-                  className="cursor-pointer"
-                  onClick={() => handleSort("total")}
-                >
-                  Total
-                  {sortField === "total" &&
-                    (sortDirection === "asc" ? (
-                      <ChevronUp size={16} className="inline ml-1" />
-                    ) : (
-                      <ChevronDown size={16} className="inline ml-1" />
-                    ))}
-                </TableHead>
-                <TableHead
-                  className="cursor-pointer"
-                  onClick={() => handleSort("deliveryDate")}
-                >
-                  Delivery Date
-                  {sortField === "deliveryDate" &&
-                    (sortDirection === "asc" ? (
-                      <ChevronUp size={16} className="inline ml-1" />
-                    ) : (
-                      <ChevronDown size={16} className="inline ml-1" />
-                    ))}
-                </TableHead>
-                <TableHead>Payment Status</TableHead>
-                <TableHead>Order Status</TableHead>
-                <TableHead>Actions</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {filteredOrders.length > 0 ? (
-                filteredOrders.map((order) => (
-                  <TableRow key={order.id}>
-                    <TableCell className="font-medium">{order.id}</TableCell>
-                    <TableCell>
-                      <div>{order.customerName}</div>
-                      <div className="text-sm text-gray-500">
-                        {order.customerEmail}
-                      </div>
-                    </TableCell>
-                    <TableCell>${order.total.toFixed(2)}</TableCell>
-                    <TableCell>
-                      {new Date(order.deliveryDate).toLocaleDateString()}
-                    </TableCell>
-                    <TableCell>
-                      <Badge
-                        className={getStatusBadgeColor(order.paymentStatus)}
-                      >
-                        {order.paymentStatus.charAt(0).toUpperCase() +
-                          order.paymentStatus.slice(1)}
-                      </Badge>
-                    </TableCell>
-                    <TableCell>
-                      <Badge className={getStatusBadgeColor(order.orderStatus)}>
-                        {order.orderStatus.charAt(0).toUpperCase() +
-                          order.orderStatus.slice(1)}
-                      </Badge>
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex gap-2">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => handleViewOrder(order)}
+          {/* Loading and Error States */}
+          {loading && (
+            <div className="flex justify-center items-center py-8">
+              <Loader2 className="h-8 w-8 animate-spin text-primary" />
+              <span className="ml-2">Loading orders...</span>
+            </div>
+          )}
+
+          {error && (
+            <Alert variant="destructive" className="mb-4">
+              <AlertCircle className="h-4 w-4" />
+              <AlertDescription>Error loading orders: {error}</AlertDescription>
+            </Alert>
+          )}
+
+          {!loading && !error && (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead
+                    className="cursor-pointer"
+                    onClick={() => handleSort("id")}
+                  >
+                    Order ID
+                    {sortField === "id" &&
+                      (sortDirection === "asc" ? (
+                        <ChevronUp size={16} className="inline ml-1" />
+                      ) : (
+                        <ChevronDown size={16} className="inline ml-1" />
+                      ))}
+                  </TableHead>
+                  <TableHead
+                    className="cursor-pointer"
+                    onClick={() => handleSort("customerName")}
+                  >
+                    Customer
+                    {sortField === "customerName" &&
+                      (sortDirection === "asc" ? (
+                        <ChevronUp size={16} className="inline ml-1" />
+                      ) : (
+                        <ChevronDown size={16} className="inline ml-1" />
+                      ))}
+                  </TableHead>
+                  <TableHead
+                    className="cursor-pointer"
+                    onClick={() => handleSort("total")}
+                  >
+                    Total
+                    {sortField === "total" &&
+                      (sortDirection === "asc" ? (
+                        <ChevronUp size={16} className="inline ml-1" />
+                      ) : (
+                        <ChevronDown size={16} className="inline ml-1" />
+                      ))}
+                  </TableHead>
+                  <TableHead
+                    className="cursor-pointer"
+                    onClick={() => handleSort("deliveryDate")}
+                  >
+                    Delivery Date
+                    {sortField === "deliveryDate" &&
+                      (sortDirection === "asc" ? (
+                        <ChevronUp size={16} className="inline ml-1" />
+                      ) : (
+                        <ChevronDown size={16} className="inline ml-1" />
+                      ))}
+                  </TableHead>
+                  <TableHead>Payment Status</TableHead>
+                  <TableHead>Order Status</TableHead>
+                  <TableHead>Actions</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {filteredOrders.length > 0 ? (
+                  filteredOrders.map((order) => (
+                    <TableRow key={order.id}>
+                      <TableCell className="font-medium">{order.id}</TableCell>
+                      <TableCell>
+                        <div>{order.customerName}</div>
+                        <div className="text-sm text-gray-500">
+                          {order.customerEmail}
+                        </div>
+                      </TableCell>
+                      <TableCell>${order.total.toFixed(2)}</TableCell>
+                      <TableCell>
+                        {new Date(order.deliveryDate).toLocaleDateString()}
+                      </TableCell>
+                      <TableCell>
+                        <Badge
+                          className={getStatusBadgeColor(order.paymentStatus)}
                         >
-                          <Eye size={16} />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => handleEditOrder(order)}
+                          {order.paymentStatus.charAt(0).toUpperCase() +
+                            order.paymentStatus.slice(1)}
+                        </Badge>
+                      </TableCell>
+                      <TableCell>
+                        <Badge
+                          className={getStatusBadgeColor(order.orderStatus)}
                         >
-                          <Edit size={16} />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => handleDeleteOrder(order)}
-                        >
-                          <Trash2 size={16} />
-                        </Button>
-                      </div>
+                          {order.orderStatus.charAt(0).toUpperCase() +
+                            order.orderStatus.slice(1)}
+                        </Badge>
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex gap-2">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => handleViewOrder(order)}
+                          >
+                            <Eye size={16} />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => handleEditOrder(order)}
+                          >
+                            <Edit size={16} />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => handleDeleteOrder(order)}
+                          >
+                            <Trash2 size={16} />
+                          </Button>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  ))
+                ) : (
+                  <TableRow>
+                    <TableCell
+                      colSpan={7}
+                      className="text-center py-8 text-gray-500"
+                    >
+                      No orders found matching your criteria
                     </TableCell>
                   </TableRow>
-                ))
-              ) : (
-                <TableRow>
-                  <TableCell
-                    colSpan={7}
-                    className="text-center py-8 text-gray-500"
-                  >
-                    No orders found matching your criteria
-                  </TableCell>
-                </TableRow>
-              )}
-            </TableBody>
-          </Table>
+                )}
+              </TableBody>
+            </Table>
+          )}
         </CardContent>
       </Card>
 
@@ -555,7 +562,12 @@ const OrderManagement = () => {
               >
                 Cancel
               </Button>
-              <Button onClick={() => setIsEditDialogOpen(false)}>
+              <Button
+                onClick={() =>
+                  selectedOrder &&
+                  handleSaveOrderChanges(selectedOrder.id, selectedOrder)
+                }
+              >
                 Save Changes
               </Button>
             </DialogFooter>

@@ -60,10 +60,13 @@ export default function ProductsPage() {
           );
         }
 
+        console.log("Fetching products from Supabase...");
         const { data, error } = await supabase
           .from("products")
-          .select("*")
-          .eq("available", true);
+          .select(
+            "id, name, description, price, category, available, stock, image_url",
+          );
+        console.log("Supabase response:", { data, error });
 
         if (error) {
           console.error("Supabase query error:", error);
@@ -76,12 +79,21 @@ export default function ProductsPage() {
             data.length,
             "products found",
           );
+
+          // Store products in localStorage for cart reference
+          localStorage.setItem("milkman_products", JSON.stringify(data));
           // Transform data to match our Product interface if needed
           const formattedProducts = data.map((product) => ({
-            ...product,
+            id: product.id,
+            title: product.name,
+            description: product.description,
+            price: product.price,
+            image_url: product.image_url,
+            category: product.category,
             isOrganic:
               product.category === "organic" ||
-              product.title.toLowerCase().includes("organic"),
+              product.name.toLowerCase().includes("organic"),
+            available: product.available,
           }));
           setProducts(formattedProducts);
         } else {
@@ -183,10 +195,16 @@ export default function ProductsPage() {
         : products.filter((p) => p.category === filter);
 
   const addToCart = (productId: string) => {
-    setCart((prev) => ({
-      ...prev,
-      [productId]: (prev[productId] || 0) + 1,
-    }));
+    setCart((prev) => {
+      const updatedCart = {
+        ...prev,
+        [productId]: (prev[productId] || 0) + 1,
+      };
+
+      // Save to localStorage immediately
+      localStorage.setItem("milkman_cart", JSON.stringify(updatedCart));
+      return updatedCart;
+    });
 
     toast({
       title: "Added to cart",
@@ -203,6 +221,9 @@ export default function ProductsPage() {
       } else {
         delete newCart[productId];
       }
+
+      // Save to localStorage immediately
+      localStorage.setItem("milkman_cart", JSON.stringify(newCart));
       return newCart;
     });
   };
@@ -291,12 +312,21 @@ export default function ProductsPage() {
                 {totalItems} item{totalItems !== 1 ? "s" : ""} in cart
               </span>
             </div>
-            <Button
-              size="sm"
-              onClick={() => (window.location.href = "/checkout")}
-            >
-              Checkout
-            </Button>
+            <div className="flex space-x-2">
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => (window.location.href = "/cart")}
+              >
+                View Cart
+              </Button>
+              <Button
+                size="sm"
+                onClick={() => (window.location.href = "/checkout")}
+              >
+                Checkout
+              </Button>
+            </div>
           </div>
         )}
 
