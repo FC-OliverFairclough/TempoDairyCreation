@@ -46,16 +46,36 @@ export default function ProductsPage() {
   useEffect(() => {
     async function fetchProducts() {
       try {
+        setLoading(true);
+        setError(null);
+
+        // Check if Supabase URL and key are available
+        if (
+          !import.meta.env.VITE_SUPABASE_URL ||
+          !import.meta.env.VITE_SUPABASE_ANON_KEY
+        ) {
+          console.error("Supabase environment variables are missing");
+          throw new Error(
+            "Configuration error: Database connection not available",
+          );
+        }
+
         const { data, error } = await supabase
           .from("products")
           .select("*")
           .eq("available", true);
 
         if (error) {
+          console.error("Supabase query error:", error);
           throw error;
         }
 
-        if (data) {
+        if (data && data.length > 0) {
+          console.log(
+            "Products loaded successfully:",
+            data.length,
+            "products found",
+          );
           // Transform data to match our Product interface if needed
           const formattedProducts = data.map((product) => ({
             ...product,
@@ -64,6 +84,9 @@ export default function ProductsPage() {
               product.title.toLowerCase().includes("organic"),
           }));
           setProducts(formattedProducts);
+        } else {
+          console.log("No products found or empty data array returned");
+          throw new Error("No products available");
         }
       } catch (err) {
         console.error("Error fetching products:", err);
@@ -138,13 +161,19 @@ export default function ProductsPage() {
             available: true,
           },
         ]);
+        toast({
+          title: "Using mock data",
+          description:
+            "Couldn't connect to the database, showing sample products instead",
+          variant: "destructive",
+        });
       } finally {
         setLoading(false);
       }
     }
 
     fetchProducts();
-  }, []);
+  }, [toast]);
 
   const filteredProducts =
     filter === "all"
@@ -184,7 +213,10 @@ export default function ProductsPage() {
     return (
       <Layout>
         <div className="container mx-auto px-4 py-8">
-          <p className="text-center">Loading products...</p>
+          <div className="flex flex-col items-center justify-center h-64">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mb-4"></div>
+            <p className="text-center text-lg">Loading products...</p>
+          </div>
         </div>
       </Layout>
     );

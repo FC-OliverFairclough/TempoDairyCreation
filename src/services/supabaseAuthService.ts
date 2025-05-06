@@ -59,8 +59,8 @@ export const login = async (credentials: LoginCredentials): Promise<User> => {
     throw new Error("User profile not found");
   }
 
-  // Return user data in the expected format
-  return {
+  // Create user object with role information
+  const user = {
     id: userData.id,
     email: userData.email,
     firstName: userData.first_name,
@@ -70,6 +70,11 @@ export const login = async (credentials: LoginCredentials): Promise<User> => {
     createdAt: new Date(userData.created_at),
     role: userData.role as "admin" | "user",
   };
+
+  // Store user data in localStorage for persistence
+  localStorage.setItem("currentUser", JSON.stringify(user));
+
+  return user;
 };
 
 /**
@@ -107,7 +112,7 @@ export const signup = async (data: SignupData): Promise<User> => {
         last_name: data.lastName,
         address: data.address || "",
         phone: data.phone || "",
-        role: "user", // Default role
+        role: "user", // Default role for new users
       },
     ])
     .select()
@@ -119,8 +124,8 @@ export const signup = async (data: SignupData): Promise<User> => {
     throw new Error(userError.message);
   }
 
-  // Return user data in the expected format
-  return {
+  // Create user object
+  const user = {
     id: userData.id,
     email: userData.email,
     firstName: userData.first_name,
@@ -130,12 +135,18 @@ export const signup = async (data: SignupData): Promise<User> => {
     createdAt: new Date(userData.created_at),
     role: userData.role as "admin" | "user",
   };
+
+  // Store user data in localStorage
+  localStorage.setItem("currentUser", JSON.stringify(user));
+
+  return user;
 };
 
 /**
  * Logout the current user
  */
 export const logout = async (): Promise<void> => {
+  localStorage.removeItem("currentUser");
   const { error } = await supabase.auth.signOut();
   if (error) {
     throw new Error(error.message);
@@ -146,7 +157,22 @@ export const logout = async (): Promise<void> => {
  * Get the current logged in user
  */
 export const getCurrentUser = async (): Promise<User | null> => {
-  // Get the current session
+  // Try to get from localStorage first for immediate response
+  const storedUser = localStorage.getItem("currentUser");
+  if (storedUser) {
+    try {
+      const parsedUser = JSON.parse(storedUser);
+      return {
+        ...parsedUser,
+        createdAt: new Date(parsedUser.createdAt),
+      };
+    } catch (error) {
+      console.error("Error parsing stored user:", error);
+      localStorage.removeItem("currentUser");
+    }
+  }
+
+  // If not in localStorage or parsing failed, check with Supabase
   const {
     data: { session },
   } = await supabase.auth.getSession();
@@ -166,8 +192,8 @@ export const getCurrentUser = async (): Promise<User | null> => {
     return null;
   }
 
-  // Return user data in the expected format
-  return {
+  // Create and store user object
+  const user = {
     id: userData.id,
     email: userData.email,
     firstName: userData.first_name,
@@ -177,6 +203,10 @@ export const getCurrentUser = async (): Promise<User | null> => {
     createdAt: new Date(userData.created_at),
     role: userData.role as "admin" | "user",
   };
+
+  localStorage.setItem("currentUser", JSON.stringify(user));
+
+  return user;
 };
 
 /**

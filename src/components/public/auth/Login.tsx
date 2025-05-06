@@ -13,7 +13,7 @@ import {
   FormLabel,
   FormMessage,
 } from "@/components/ui/form";
-import { login, getUserRole } from "@/services/authService";
+import { login, getUserRole } from "@/services/supabaseAuthService";
 import Layout from "../Layout";
 import { AlertCircle } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -44,13 +44,16 @@ export default function Login() {
     setError(null);
 
     try {
+      // Use the Supabase authentication service
       await login({
         email: data.email,
         password: data.password,
       });
 
+      // Get user role from Supabase
+      const role = await getUserRole();
+
       // Redirect based on user role
-      const role = getUserRole();
       if (role === "admin") {
         navigate("/admin");
       } else {

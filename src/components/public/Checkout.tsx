@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import Layout from "./Layout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -14,17 +14,27 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { CreditCard, MapPin, ShoppingCart, Truck, Check } from "lucide-react";
+import {
+  CreditCard,
+  MapPin,
+  ShoppingCart,
+  Truck,
+  Check,
+  AlertCircle,
+} from "lucide-react";
+import { useToast } from "@/components/ui/use-toast";
+import { getCurrentUser } from "@/services/supabaseAuthService";
+import { createOrder } from "@/services/orderService";
 
-// Mock cart items - in a real app, this would come from a cart state or context
-const mockCartItems = [
-  { id: 1, name: "Whole Milk", quantity: 2, price: 3.99 },
-  { id: 3, name: "Butter", quantity: 1, price: 4.99 },
-  { id: 4, name: "Yogurt", quantity: 4, price: 2.99 },
-];
+interface CartItem {
+  id: string;
+  name: string;
+  quantity: number;
+  price: number;
+}
 
 export default function Checkout() {
-  const [cartItems, setCartItems] = useState(mockCartItems);
+  const [cartItems, setCartItems] = useState<CartItem[]>([]);
   const [paymentMethod, setPaymentMethod] = useState("card");
   const [deliveryAddress, setDeliveryAddress] = useState({
     street: "",
@@ -34,6 +44,84 @@ export default function Checkout() {
   });
   const [isProcessing, setIsProcessing] = useState(false);
   const [isComplete, setIsComplete] = useState(false);
+  const [orderId, setOrderId] = useState<string>("");
+  const [user, setUser] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const { toast } = useToast();
+  const navigate = useNavigate();
+
+  // Load cart from localStorage on component mount
+  useEffect(() => {
+    const loadCartAndUser = async () => {
+      try {
+        // Get current user
+        const currentUser = await getCurrentUser();
+        if (!currentUser) {
+          // Redirect to login if not authenticated
+          navigate("/login");
+          return;
+        }
+        setUser(currentUser);
+
+        // Load cart from localStorage
+        const savedCart = localStorage.getItem("milkman_cart");
+        if (savedCart) {
+          const cartData = JSON.parse(savedCart);
+
+          // Convert cart object to array of items with product details
+          const cartItemsArray: CartItem[] = [];
+
+          // If we have products in localStorage, use them
+          const productsData = localStorage.getItem("milkman_products");
+          if (productsData) {
+            const products = JSON.parse(productsData);
+
+            // For each item in the cart, find the corresponding product
+            Object.entries(cartData).forEach(([productId, quantity]) => {
+              const product = products.find((p: any) => p.id === productId);
+              if (product) {
+                cartItemsArray.push({
+                  id: productId,
+                  name: product.title,
+                  quantity: quantity as number,
+                  price: product.price,
+                });
+              }
+            });
+          } else {
+            // Fallback to mock data if no products in localStorage
+            toast({
+              title: "Cart data incomplete",
+              description: "Some product information could not be loaded",
+              variant: "destructive",
+            });
+          }
+
+          if (cartItemsArray.length > 0) {
+            setCartItems(cartItemsArray);
+          } else {
+            setError(
+              "Your cart is empty. Please add some products before checkout.",
+            );
+            setTimeout(() => navigate("/products"), 3000);
+          }
+        } else {
+          setError(
+            "Your cart is empty. Please add some products before checkout.",
+          );
+          setTimeout(() => navigate("/products"), 3000);
+        }
+      } catch (err) {
+        console.error("Error loading cart and user data:", err);
+        setError("Failed to load checkout data. Please try again later.");
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    loadCartAndUser();
+  }, [navigate, toast]);
 
   const subtotal = cartItems.reduce(
     (sum, item) => sum + item.price * item.quantity,
@@ -50,16 +138,121 @@ export default function Checkout() {
     }));
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  // Mock payment processing function
+  const processPayment = async (amount: number): Promise<boolean> => {
+    // In a real app, this would integrate with Stripe or another payment processor
+    return new Promise((resolve) => {
+      // Simulate API call delay
+      setTimeout(() => {
+        // Simulate successful payment (would be actual API response in production)
+        const isSuccessful = true;
+        resolve(isSuccessful);
+      }, 1500);
+    });
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    // Validate form
+    if (
+      !deliveryAddress.street ||
+      !deliveryAddress.city ||
+      !deliveryAddress.state ||
+      !deliveryAddress.zipCode
+    ) {
+      toast({
+        title: "Missing information",
+        description: "Please fill in all address fields",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (cartItems.length === 0) {
+      toast({
+        title: "Empty cart",
+        description: "Your cart is empty. Please add products before checkout.",
+        variant: "destructive",
+      });
+      return;
+    }
+
     setIsProcessing(true);
 
-    // Simulate payment processing
-    setTimeout(() => {
-      setIsProcessing(false);
+    try {
+      // Process payment
+      const paymentSuccessful = await processPayment(total);
+
+      if (!paymentSuccessful) {
+        throw new Error("Payment processing failed");
+      }
+
+      // Create order in database
+      const orderItems = cartItems.map((item) => ({
+        product_id: item.id,
+        quantity: item.quantity,
+        price: item.price,
+      }));
+
+      const newOrderId = await createOrder({
+        user_id: user.id,
+        total_amount: total,
+        payment_method: paymentMethod,
+        delivery_address: deliveryAddress,
+        items: orderItems,
+      });
+
+      // Clear cart from localStorage
+      localStorage.removeItem("milkman_cart");
+
+      // Set order ID for confirmation page
+      setOrderId(newOrderId);
       setIsComplete(true);
-    }, 2000);
+    } catch (err) {
+      console.error("Error processing order:", err);
+      toast({
+        title: "Order processing failed",
+        description:
+          "There was an error processing your order. Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsProcessing(false);
+    }
   };
+
+  if (loading) {
+    return (
+      <Layout>
+        <div className="container mx-auto px-4 py-8 flex justify-center items-center min-h-[50vh]">
+          <div className="flex flex-col items-center">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mb-4"></div>
+            <p className="text-center text-lg">Loading checkout...</p>
+          </div>
+        </div>
+      </Layout>
+    );
+  }
+
+  if (error) {
+    return (
+      <Layout>
+        <div className="container mx-auto px-4 py-8">
+          <div className="max-w-md mx-auto text-center">
+            <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-red-100 mb-6">
+              <AlertCircle className="h-8 w-8 text-red-600" />
+            </div>
+            <h1 className="text-2xl font-bold mb-4">Checkout Error</h1>
+            <p className="text-muted-foreground mb-8">{error}</p>
+            <Button asChild className="w-full">
+              <Link to="/products">Browse Products</Link>
+            </Button>
+          </div>
+        </div>
+      </Layout>
+    );
+  }
 
   if (isComplete) {
     return (
@@ -75,9 +268,7 @@ export default function Checkout() {
               deliver your items on the next delivery day.
             </p>
             <div className="bg-muted p-4 rounded-md mb-8">
-              <p className="font-medium">
-                Order #ORD-{Math.floor(Math.random() * 10000)}
-              </p>
+              <p className="font-medium">Order #{orderId.slice(0, 8)}</p>
               <p className="text-sm text-muted-foreground">
                 A confirmation has been sent to your email
               </p>
