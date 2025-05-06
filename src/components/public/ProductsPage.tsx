@@ -1,103 +1,172 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardFooter } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { ShoppingCart, Plus, Minus } from "lucide-react";
 import Layout from "./Layout";
-
-// Mock product data - in a real app, this would come from an API
-const mockProducts = [
-  {
-    id: 1,
-    name: "Whole Milk",
-    description: "Fresh whole milk from local farms",
-    price: 3.99,
-    image:
-      "https://images.unsplash.com/photo-1563636619-e9143da7973b?w=400&q=80",
-    category: "milk",
-    isOrganic: true,
-  },
-  {
-    id: 2,
-    name: "Low-Fat Milk",
-    description: "2% milk, perfect for everyday use",
-    price: 3.49,
-    image:
-      "https://images.unsplash.com/photo-1550583724-b2692b85b150?w=400&q=80",
-    category: "milk",
-    isOrganic: false,
-  },
-  {
-    id: 3,
-    name: "Butter",
-    description: "Creamy butter made from grass-fed cows",
-    price: 4.99,
-    image:
-      "https://images.unsplash.com/photo-1589985270826-4b7bb135bc9d?w=400&q=80",
-    category: "butter",
-    isOrganic: true,
-  },
-  {
-    id: 4,
-    name: "Yogurt",
-    description: "Probiotic plain yogurt",
-    price: 2.99,
-    image:
-      "https://images.unsplash.com/photo-1584278860047-22db9ff82bed?w=400&q=80",
-    category: "yogurt",
-    isOrganic: true,
-  },
-  {
-    id: 5,
-    name: "Cheese",
-    description: "Aged cheddar cheese",
-    price: 5.99,
-    image:
-      "https://images.unsplash.com/photo-1486297678162-eb2a19b0a32d?w=400&q=80",
-    category: "cheese",
-    isOrganic: false,
-  },
-  {
-    id: 6,
-    name: "Cream",
-    description: "Heavy whipping cream",
-    price: 3.29,
-    image:
-      "https://images.unsplash.com/photo-1587657565520-6c0c76b9f5f3?w=400&q=80",
-    category: "cream",
-    isOrganic: false,
-  },
-];
+import { supabase } from "@/lib/supabase";
+import { useToast } from "@/components/ui/use-toast";
 
 interface Product {
-  id: number;
-  name: string;
+  id: string;
+  title: string;
   description: string;
   price: number;
-  image: string;
-  category: string;
-  isOrganic: boolean;
+  image_url: string;
+  category?: string;
+  isOrganic?: boolean;
+  available: boolean;
 }
 
 export default function ProductsPage() {
-  const [cart, setCart] = useState<{ [key: number]: number }>({}); // Product ID -> Quantity
+  const [products, setProducts] = useState<Product[]>([]);
+  const [cart, setCart] = useState<{ [key: string]: number }>({}); // Product ID -> Quantity
   const [filter, setFilter] = useState<string>("all");
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const { toast } = useToast();
+
+  // Load cart from localStorage on component mount
+  useEffect(() => {
+    const savedCart = localStorage.getItem("milkman_cart");
+    if (savedCart) {
+      try {
+        setCart(JSON.parse(savedCart));
+      } catch (e) {
+        console.error("Failed to parse cart from localStorage", e);
+      }
+    }
+  }, []);
+
+  // Save cart to localStorage whenever it changes
+  useEffect(() => {
+    localStorage.setItem("milkman_cart", JSON.stringify(cart));
+  }, [cart]);
+
+  useEffect(() => {
+    async function fetchProducts() {
+      try {
+        const { data, error } = await supabase
+          .from("products")
+          .select("*")
+          .eq("available", true);
+
+        if (error) {
+          throw error;
+        }
+
+        if (data) {
+          // Transform data to match our Product interface if needed
+          const formattedProducts = data.map((product) => ({
+            ...product,
+            isOrganic:
+              product.category === "organic" ||
+              product.title.toLowerCase().includes("organic"),
+          }));
+          setProducts(formattedProducts);
+        }
+      } catch (err) {
+        console.error("Error fetching products:", err);
+        setError("Failed to load products. Please try again later.");
+
+        // Fallback to mock data if Supabase fetch fails
+        setProducts([
+          {
+            id: "1",
+            title: "Whole Milk",
+            description: "Fresh whole milk from local farms",
+            price: 3.99,
+            image_url:
+              "https://images.unsplash.com/photo-1563636619-e9143da7973b?w=400&q=80",
+            category: "milk",
+            isOrganic: true,
+            available: true,
+          },
+          {
+            id: "2",
+            title: "Low-Fat Milk",
+            description: "2% milk, perfect for everyday use",
+            price: 3.49,
+            image_url:
+              "https://images.unsplash.com/photo-1550583724-b2692b85b150?w=400&q=80",
+            category: "milk",
+            isOrganic: false,
+            available: true,
+          },
+          {
+            id: "3",
+            title: "Butter",
+            description: "Creamy butter made from grass-fed cows",
+            price: 4.99,
+            image_url:
+              "https://images.unsplash.com/photo-1589985270826-4b7bb135bc9d?w=400&q=80",
+            category: "butter",
+            isOrganic: true,
+            available: true,
+          },
+          {
+            id: "4",
+            title: "Yogurt",
+            description: "Probiotic plain yogurt",
+            price: 2.99,
+            image_url:
+              "https://images.unsplash.com/photo-1584278860047-22db9ff82bed?w=400&q=80",
+            category: "yogurt",
+            isOrganic: true,
+            available: true,
+          },
+          {
+            id: "5",
+            title: "Cheese",
+            description: "Aged cheddar cheese",
+            price: 5.99,
+            image_url:
+              "https://images.unsplash.com/photo-1486297678162-eb2a19b0a32d?w=400&q=80",
+            category: "cheese",
+            isOrganic: false,
+            available: true,
+          },
+          {
+            id: "6",
+            title: "Cream",
+            description: "Heavy whipping cream",
+            price: 3.29,
+            image_url:
+              "https://images.unsplash.com/photo-1587657565520-6c0c76b9f5f3?w=400&q=80",
+            category: "cream",
+            isOrganic: false,
+            available: true,
+          },
+        ]);
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    fetchProducts();
+  }, []);
 
   const filteredProducts =
     filter === "all"
-      ? mockProducts
+      ? products
       : filter === "organic"
-        ? mockProducts.filter((p) => p.isOrganic)
-        : mockProducts.filter((p) => p.category === filter);
+        ? products.filter((p) => p.isOrganic)
+        : products.filter((p) => p.category === filter);
 
-  const addToCart = (productId: number) => {
+  const addToCart = (productId: string) => {
     setCart((prev) => ({
       ...prev,
       [productId]: (prev[productId] || 0) + 1,
     }));
+
+    toast({
+      title: "Added to cart",
+      description: "Item has been added to your cart",
+      duration: 2000,
+    });
   };
 
-  const removeFromCart = (productId: number) => {
+  const removeFromCart = (productId: string) => {
     setCart((prev) => {
       const newCart = { ...prev };
       if (newCart[productId] > 1) {
@@ -110,6 +179,26 @@ export default function ProductsPage() {
   };
 
   const totalItems = Object.values(cart).reduce((sum, qty) => sum + qty, 0);
+
+  if (loading) {
+    return (
+      <Layout>
+        <div className="container mx-auto px-4 py-8">
+          <p className="text-center">Loading products...</p>
+        </div>
+      </Layout>
+    );
+  }
+
+  if (error) {
+    return (
+      <Layout>
+        <div className="container mx-auto px-4 py-8">
+          <p className="text-center text-red-500">{error}</p>
+        </div>
+      </Layout>
+    );
+  }
 
   return (
     <Layout>
@@ -170,7 +259,12 @@ export default function ProductsPage() {
                 {totalItems} item{totalItems !== 1 ? "s" : ""} in cart
               </span>
             </div>
-            <Button size="sm">Checkout</Button>
+            <Button
+              size="sm"
+              onClick={() => (window.location.href = "/checkout")}
+            >
+              Checkout
+            </Button>
           </div>
         )}
 
@@ -180,8 +274,8 @@ export default function ProductsPage() {
             <Card key={product.id} className="overflow-hidden">
               <div className="relative h-48 overflow-hidden">
                 <img
-                  src={product.image}
-                  alt={product.name}
+                  src={product.image_url}
+                  alt={product.title}
                   className="w-full h-full object-cover transition-transform hover:scale-105"
                 />
                 {product.isOrganic && (
@@ -192,7 +286,7 @@ export default function ProductsPage() {
               </div>
 
               <CardContent className="p-4">
-                <h3 className="text-lg font-semibold">{product.name}</h3>
+                <h3 className="text-lg font-semibold">{product.title}</h3>
                 <p className="text-muted-foreground text-sm">
                   {product.description}
                 </p>

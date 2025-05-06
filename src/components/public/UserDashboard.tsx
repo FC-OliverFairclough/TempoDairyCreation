@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
-import { Link } from "react-router-dom";
-import { getCurrentUser } from "@/services/authService";
+import { Link, useNavigate } from "react-router-dom";
+import { getCurrentUser } from "@/services/supabaseAuthService";
 import Layout from "./Layout";
 import {
   Card,
@@ -17,7 +17,9 @@ import {
   Settings,
   ShoppingCart,
   User,
+  Loader2,
 } from "lucide-react";
+import { supabase } from "@/lib/supabase";
 
 interface DashboardCard {
   title: string;
@@ -27,18 +29,70 @@ interface DashboardCard {
   linkText: string;
 }
 
+interface OrderSummary {
+  count: number;
+  pending: number;
+  delivered: number;
+}
+
 export default function UserDashboard() {
   const [user, setUser] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+  const [orderSummary, setOrderSummary] = useState<OrderSummary>({
+    count: 0,
+    pending: 0,
+    delivered: 0,
+  });
+  const navigate = useNavigate();
 
   useEffect(() => {
-    const currentUser = getCurrentUser();
-    setUser(currentUser);
-  }, []);
+    async function loadUserData() {
+      try {
+        const currentUser = await getCurrentUser();
+        if (!currentUser) {
+          // Redirect to login if not authenticated
+          navigate("/login");
+          return;
+        }
+        setUser(currentUser);
+
+        // Fetch order summary for this user
+        if (currentUser.id) {
+          const { data: orders, error } = await supabase
+            .from("orders")
+            .select("delivery_status")
+            .eq("user_id", currentUser.id);
+
+          if (!error && orders) {
+            const pending = orders.filter(
+              (o) =>
+                o.delivery_status === "pending" ||
+                o.delivery_status === "processing",
+            ).length;
+            const delivered = orders.filter(
+              (o) => o.delivery_status === "delivered",
+            ).length;
+            setOrderSummary({
+              count: orders.length,
+              pending,
+              delivered,
+            });
+          }
+        }
+      } catch (error) {
+        console.error("Error loading user data:", error);
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    loadUserData();
+  }, [navigate]);
 
   const dashboardCards: DashboardCard[] = [
     {
       title: "Order History",
-      description: "View your past orders and track current deliveries",
+      description: `${orderSummary.count} orders, ${orderSummary.pending} pending`,
       icon: <Package className="h-8 w-8 text-primary" />,
       link: "/order-history",
       linkText: "View Orders",
@@ -66,11 +120,27 @@ export default function UserDashboard() {
     },
   ];
 
+  if (loading) {
+    return (
+      <Layout>
+        <div className="container mx-auto px-4 py-8 flex justify-center items-center min-h-[50vh]">
+          <div className="flex flex-col items-center">
+            <Loader2 className="h-8 w-8 animate-spin text-primary mb-4" />
+            <p>Loading your dashboard...</p>
+          </div>
+        </div>
+      </Layout>
+    );
+  }
+
   if (!user) {
     return (
       <Layout>
         <div className="container mx-auto px-4 py-8">
-          <p>Loading...</p>
+          <p>Please log in to view your dashboard</p>
+          <Button asChild className="mt-4">
+            <Link to="/login">Go to Login</Link>
+          </Button>
         </div>
       </Layout>
     );
