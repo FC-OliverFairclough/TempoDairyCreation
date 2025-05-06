@@ -81,65 +81,74 @@ export const login = async (credentials: LoginCredentials): Promise<User> => {
  * Register a new user
  */
 export const signup = async (data: SignupData): Promise<User> => {
-  // Sign up with Supabase Auth
-  const { data: authData, error: authError } = await supabase.auth.signUp({
-    email: data.email,
-    password: data.password,
-    options: {
-      data: {
-        first_name: data.firstName,
-        last_name: data.lastName,
+  console.log("Attempting to sign up user:", data.email);
+
+  try {
+    // Step 1: Create the user in Supabase Auth
+    const { data: authData, error: authError } = await supabase.auth.signUp({
+      email: data.email,
+      password: data.password,
+      options: {
+        data: {
+          first_name: data.firstName,
+          last_name: data.lastName,
+        },
       },
-    },
-  });
+    });
 
-  if (authError) {
-    throw new Error(authError.message);
-  }
+    if (authError) {
+      console.error("Error during auth signup:", authError);
+      throw new Error(authError.message);
+    }
 
-  if (!authData.user) {
-    throw new Error("No user returned from authentication");
-  }
+    if (!authData.user) {
+      console.error("No user returned from auth signup");
+      throw new Error("Failed to create user account");
+    }
 
-  // Create user profile in the users table
-  const { data: userData, error: userError } = await supabase
-    .from("users")
-    .insert([
+    console.log("User created in Auth:", authData.user.id);
+
+    // Step 2: Add the user to your users table
+    const { error: profileError } = await supabase.from("users").insert([
       {
         id: authData.user.id,
         email: data.email,
         first_name: data.firstName,
         last_name: data.lastName,
-        address: data.address || "",
-        phone: data.phone || "",
-        role: "user", // Default role for new users
+        phone: data.phone || null,
+        address: data.address || null,
+        role: "user",
       },
-    ])
-    .select()
-    .single();
+    ]);
 
-  if (userError) {
-    // If there was an error creating the user profile, delete the auth user
-    await supabase.auth.admin.deleteUser(authData.user.id);
-    throw new Error(userError.message);
+    if (profileError) {
+      console.error("Error creating user profile:", profileError);
+      // You would ideally clean up the auth user here, but it requires admin privileges
+      throw new Error("Failed to create user profile");
+    }
+
+    console.log("User profile created successfully");
+
+    // Step 3: Create and return the user object
+    const user = {
+      id: authData.user.id,
+      email: data.email,
+      firstName: data.firstName,
+      lastName: data.lastName,
+      address: data.address || "",
+      phone: data.phone || "",
+      createdAt: new Date(),
+      role: "user",
+    };
+
+    // Store in localStorage for session management
+    localStorage.setItem("currentUser", JSON.stringify(user));
+
+    return user;
+  } catch (error) {
+    console.error("Signup process failed:", error);
+    throw error;
   }
-
-  // Create user object
-  const user = {
-    id: userData.id,
-    email: userData.email,
-    firstName: userData.first_name,
-    lastName: userData.last_name,
-    address: userData.address || "",
-    phone: userData.phone || "",
-    createdAt: new Date(userData.created_at),
-    role: userData.role as "admin" | "user",
-  };
-
-  // Store user data in localStorage
-  localStorage.setItem("currentUser", JSON.stringify(user));
-
-  return user;
 };
 
 /**

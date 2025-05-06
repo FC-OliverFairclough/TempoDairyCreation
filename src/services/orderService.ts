@@ -144,3 +144,173 @@ export const updateOrderStatus = async (
     throw error;
   }
 };
+
+export const signup = async (data: SignupData): Promise<User> => {
+  console.log("Signing up user:", data.email);
+
+  try {
+    // First, create the auth user
+    const { data: authData, error: authError } = await supabase.auth.signUp({
+      email: data.email,
+      password: data.password,
+      options: {
+        data: {
+          first_name: data.firstName,
+          last_name: data.lastName,
+        },
+      },
+    });
+
+    if (authError) {
+      console.error("Auth signup error:", authError);
+      throw new Error(authError.message);
+    }
+
+    if (!authData.user) {
+      throw new Error("No user returned from authentication");
+    }
+
+    console.log("Auth user created:", authData.user.id);
+
+    // Now, explicitly create a profile in the users table
+    const { error: profileError } = await supabase.from("users").insert([
+      {
+        id: authData.user.id,
+        email: data.email,
+        first_name: data.firstName,
+        last_name: data.lastName,
+        phone: data.phone || "",
+        address: data.address || "",
+        role: "user",
+      },
+    ]);
+
+    if (profileError) {
+      console.error("Profile creation error:", profileError);
+      // If profile creation fails, we should ideally clean up the auth user
+      // but this requires admin privileges
+      throw new Error("Failed to create user profile: " + profileError.message);
+    }
+
+    console.log("User profile created successfully");
+
+    // Create user object to return
+    const user = {
+      id: authData.user.id,
+      email: data.email,
+      firstName: data.firstName,
+      lastName: data.lastName,
+      address: data.address || "",
+      phone: data.phone || "",
+      createdAt: new Date(),
+      role: "user",
+    };
+
+    // Store in localStorage
+    localStorage.setItem("currentUser", JSON.stringify(user));
+
+    return user;
+  } catch (error) {
+    console.error("Signup process failed:", error);
+    throw error;
+  }
+};
+
+export const login = async (credentials: LoginCredentials): Promise<User> => {
+  try {
+    console.log("Login attempt:", credentials.email);
+
+    // First authenticate with Supabase Auth
+    const { data: authData, error: authError } =
+      await supabase.auth.signInWithPassword({
+        email: credentials.email,
+        password: credentials.password,
+      });
+
+    if (authError) {
+      console.error("Auth error:", authError);
+      throw new Error(authError.message);
+    }
+
+    if (!authData.user) {
+      throw new Error("No user returned from authentication");
+    }
+
+    console.log("Auth successful, user ID:", authData.user.id);
+
+    // Then try to get the user profile
+    const { data: userData, error: userError } = await supabase
+      .from("users")
+      .select("*")
+      .eq("id", authData.user.id)
+      .single();
+
+    if (userError) {
+      console.error("Error fetching user profile:", userError);
+
+      // Create a user record if one doesn't exist
+      console.log("Creating missing user profile");
+      const { error: insertError } = await supabase.from("users").insert([
+        {
+          id: authData.user.id,
+          email: authData.user.email,
+          first_name: authData.user.user_metadata?.first_name || "User",
+          last_name: authData.user.user_metadata?.last_name || "",
+          role: "user",
+        },
+      ]);
+
+      if (insertError) {
+        console.error("Failed to create user profile:", insertError);
+        throw new Error("Failed to create user profile");
+      }
+
+      // Try to fetch the profile again
+      const { data: newUserData, error: newFetchError } = await supabase
+        .from("users")
+        .select("*")
+        .eq("id", authData.user.id)
+        .single();
+
+      if (newFetchError || !newUserData) {
+        throw new Error("Failed to fetch user profile");
+      }
+
+      // Use the newly created profile
+      return {
+        id: newUserData.id,
+        email: newUserData.email,
+        firstName: newUserData.first_name,
+        lastName: newUserData.last_name,
+        address: newUserData.address || "",
+        phone: newUserData.phone || "",
+        createdAt: new Date(newUserData.created_at),
+        role: newUserData.role,
+      };
+    }
+
+    if (!userData) {
+      throw new Error("User profile not found");
+    }
+
+    // Create and return the user object
+    const user = {
+      id: userData.id,
+      email: userData.email,
+      firstName: userData.first_name,
+      lastName: userData.last_name,
+      address: userData.address || "",
+      phone: userData.phone || "",
+      createdAt: new Date(userData.created_at),
+      role: userData.role,
+    };
+
+    // Store in localStorage
+    localStorage.setItem("currentUser", JSON.stringify(user));
+
+    return user;
+  } catch (err) {
+    console.error("Login error:", err);
+    throw err;
+  }
+};
