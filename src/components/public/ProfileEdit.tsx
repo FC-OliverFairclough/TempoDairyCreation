@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { getCurrentUser } from "@/services/authService";
+import { supabase } from "@/lib/supabase";
 import Layout from "./Layout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -14,37 +14,68 @@ import {
 } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { User, Mail, Phone, Home, Save } from "lucide-react";
+import { useToast } from "@/components/ui/use-toast";
 
 export default function ProfileEdit() {
   const [user, setUser] = useState<any>(null);
+  const [loading, setLoading] = useState(false);
+  const { toast } = useToast();
+  
   const [formData, setFormData] = useState({
     firstName: "",
     lastName: "",
     email: "",
     phone: "",
-    address: "",
-    city: "",
-    state: "",
-    zipCode: "",
+    address: "",      // Street address
+    city: "",         // City/Town
+    county: "",       // County (changed from state for UK)
+    postcode: "",     // Postcode (changed from zipCode for UK)
   });
 
   useEffect(() => {
-    const currentUser = getCurrentUser();
-    setUser(currentUser);
+    const fetchUserProfile = async () => {
+      try {
+        // Get current authenticated user
+        const { data: { user: authUser } } = await supabase.auth.getUser();
+        
+        if (!authUser) {
+          // User not authenticated
+          return;
+        }
+        
+        setUser(authUser);
+        
+        // Fetch the user's profile data
+        const { data: profileData, error } = await supabase
+          .from('users')
+          .select('*')
+          .eq('id', authUser.id)
+          .single();
+          
+        if (error && error.code !== 'PGRST116') {
+          console.error("Error fetching profile:", error);
+          return;
+        }
+        
+        // If profile exists, update the form with existing data
+        if (profileData) {
+          setFormData({
+            firstName: profileData.first_name || "",
+            lastName: profileData.last_name || "",
+            email: profileData.email || authUser.email || "",
+            phone: profileData.phone || "",
+            address: profileData.address || "",
+            city: profileData.city || "",
+            county: profileData.county || "",  // Changed from state to county
+            postcode: profileData.postcode || "", // Changed from zipCode to postcode
+          });
+        }
+      } catch (err) {
+        console.error("Error in useEffect:", err);
+      }
+    };
 
-    // Populate form with user data
-    if (currentUser) {
-      setFormData({
-        firstName: currentUser.firstName || "",
-        lastName: currentUser.lastName || "",
-        email: currentUser.email || "",
-        phone: currentUser.phone || "",
-        address: currentUser.address || "",
-        city: currentUser.city || "",
-        state: currentUser.state || "",
-        zipCode: currentUser.zipCode || "",
-      });
-    }
+    fetchUserProfile();
   }, []);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -55,11 +86,53 @@ export default function ProfileEdit() {
     }));
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    // In a real app, this would update the user profile via an API call
-    console.log("Profile update submitted:", formData);
-    // Show success message or redirect
+    
+    if (!user) {
+      toast({
+        title: "Error",
+        description: "You must be logged in to update your profile",
+        variant: "destructive"
+      });
+      return;
+    }
+    
+    setLoading(true);
+    
+    try {
+      // Update the user profile in the database
+      const { error } = await supabase
+        .from('users')
+        .update({
+          first_name: formData.firstName,
+          last_name: formData.lastName,
+          email: formData.email,
+          phone: formData.phone,
+          address: formData.address,
+          city: formData.city,
+          county: formData.county,       // Changed from state to county
+          postcode: formData.postcode,   // Changed from zipCode to postcode
+          updated_at: new Date()
+        })
+        .eq('id', user.id);
+      
+      if (error) throw error;
+      
+      toast({
+        title: "Success",
+        description: "Your profile has been updated successfully",
+      });
+    } catch (error) {
+      console.error("Error updating profile:", error);
+      toast({
+        title: "Error",
+        description: "Failed to update profile. Please try again.",
+        variant: "destructive"
+      });
+    } finally {
+      setLoading(false);
+    }
   };
 
   if (!user) {
@@ -162,7 +235,7 @@ export default function ProfileEdit() {
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                   <div className="space-y-2">
-                    <Label htmlFor="city">City</Label>
+                    <Label htmlFor="city">City/Town</Label>
                     <Input
                       id="city"
                       name="city"
@@ -171,20 +244,20 @@ export default function ProfileEdit() {
                     />
                   </div>
                   <div className="space-y-2">
-                    <Label htmlFor="state">State</Label>
+                    <Label htmlFor="county">County</Label>
                     <Input
-                      id="state"
-                      name="state"
-                      value={formData.state}
+                      id="county"
+                      name="county"
+                      value={formData.county}
                       onChange={handleChange}
                     />
                   </div>
                   <div className="space-y-2">
-                    <Label htmlFor="zipCode">ZIP Code</Label>
+                    <Label htmlFor="postcode">Postcode</Label>
                     <Input
-                      id="zipCode"
-                      name="zipCode"
-                      value={formData.zipCode}
+                      id="postcode"
+                      name="postcode"
+                      value={formData.postcode}
                       onChange={handleChange}
                     />
                   </div>
@@ -193,9 +266,9 @@ export default function ProfileEdit() {
             </Tabs>
           </CardContent>
           <CardFooter>
-            <Button onClick={handleSubmit} className="w-full md:w-auto">
+            <Button onClick={handleSubmit} className="w-full md:w-auto" disabled={loading}>
               <Save className="h-4 w-4 mr-2" />
-              Save Changes
+              {loading ? "Saving..." : "Save Changes"}
             </Button>
           </CardFooter>
         </Card>
