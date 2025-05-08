@@ -74,6 +74,10 @@ export const login = async (credentials: LoginCredentials): Promise<User> => {
   // Store user data in localStorage for persistence
   localStorage.setItem("currentUser", JSON.stringify(user));
 
+  // Ensure the session is properly set
+  const { data: sessionData } = await supabase.auth.getSession();
+  console.log("Session established:", !!sessionData.session);
+
   return user;
 };
 
@@ -166,28 +170,32 @@ export const logout = async (): Promise<void> => {
  * Get the current logged in user
  */
 export const getCurrentUser = async (): Promise<User | null> => {
-  // Try to get from localStorage first for immediate response
+  // First check if we have an active session with Supabase
+  const { data: sessionData } = await supabase.auth.getSession();
+  const session = sessionData?.session;
+
+  // If no active session, return null immediately
+  if (!session) {
+    localStorage.removeItem("currentUser"); // Clear any stale data
+    return null;
+  }
+
+  // Try to get from localStorage for immediate response if session exists
   const storedUser = localStorage.getItem("currentUser");
   if (storedUser) {
     try {
       const parsedUser = JSON.parse(storedUser);
-      return {
-        ...parsedUser,
-        createdAt: new Date(parsedUser.createdAt),
-      };
+      // Verify the stored user matches the current session user
+      if (parsedUser.id === session.user.id) {
+        return {
+          ...parsedUser,
+          createdAt: new Date(parsedUser.createdAt),
+        };
+      }
     } catch (error) {
       console.error("Error parsing stored user:", error);
       localStorage.removeItem("currentUser");
     }
-  }
-
-  // If not in localStorage or parsing failed, check with Supabase
-  const {
-    data: { session },
-  } = await supabase.auth.getSession();
-
-  if (!session) {
-    return null;
   }
 
   // Get the user profile from the users table
@@ -198,6 +206,7 @@ export const getCurrentUser = async (): Promise<User | null> => {
     .single();
 
   if (userError || !userData) {
+    console.error("Error fetching user data:", userError);
     return null;
   }
 

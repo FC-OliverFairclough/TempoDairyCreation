@@ -13,7 +13,7 @@ import {
   FormLabel,
   FormMessage,
 } from "@/components/ui/form";
-import { signup } from "@/services/authService";
+import { signup } from "@/services/supabaseAuthService";
 import Layout from "../Layout";
 import { AlertCircle } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";

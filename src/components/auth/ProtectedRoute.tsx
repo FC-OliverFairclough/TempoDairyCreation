@@ -1,6 +1,7 @@
 import { ReactNode, useEffect, useState } from "react";
 import { Navigate, useLocation } from "react-router-dom";
 import { isAuthenticated, getUserRole } from "@/services/supabaseAuthService";
+import { supabase } from "@/lib/supabase";
 
 interface ProtectedRouteProps {
   children: ReactNode;
@@ -39,6 +40,18 @@ export default function ProtectedRoute({
     };
 
     checkAuth();
+
+    // Set up auth state change listener
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange(() => {
+      checkAuth();
+    });
+
+    // Cleanup subscription
+    return () => {
+      subscription.unsubscribe();
+    };
   }, [requiredRole]);
 
   if (isLoading) {

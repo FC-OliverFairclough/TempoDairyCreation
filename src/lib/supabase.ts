@@ -9,4 +9,12 @@ if (!supabaseUrl || !supabaseAnonKey) {
   console.error("Missing Supabase environment variables");
 }
 
-export const supabase = createClient<Database>(supabaseUrl, supabaseAnonKey);
+// Configure with persistent sessions using localStorage
+export const supabase = createClient<Database>(supabaseUrl, supabaseAnonKey, {
+  auth: {
+    persistSession: true,
+    storageKey: "milkman-auth-storage",
+    autoRefreshToken: true,
+    detectSessionInUrl: true,
+  },
+});
