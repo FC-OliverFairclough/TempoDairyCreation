@@ -15,68 +15,63 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { User, Mail, Phone, Home, Save } from "lucide-react";
 import { useToast } from "@/components/ui/use-toast";
+import { useUserProfile } from "@/hooks/useUserProfile";
 
 export default function ProfileEdit() {
-  const [user, setUser] = useState<any>(null);
+  const { user, updateUserState } = useUserProfile();
   const [loading, setLoading] = useState(false);
   const { toast } = useToast();
-  
+
   const [formData, setFormData] = useState({
     firstName: "",
     lastName: "",
     email: "",
     phone: "",
-    address: "",      // Street address
-    city: "",         // City/Town
-    county: "",       // County (changed from state for UK)
-    postcode: "",     // Postcode (changed from zipCode for UK)
+    address: "", // Street address
+    city: "", // City/Town
+    county: "", // County (changed from state for UK)
+    postcode: "", // Postcode (changed from zipCode for UK)
   });
 
   useEffect(() => {
-    const fetchUserProfile = async () => {
-      try {
-        // Get current authenticated user
-        const { data: { user: authUser } } = await supabase.auth.getUser();
-        
-        if (!authUser) {
-          // User not authenticated
-          return;
-        }
-        
-        setUser(authUser);
-        
-        // Fetch the user's profile data
-        const { data: profileData, error } = await supabase
-          .from('users')
-          .select('*')
-          .eq('id', authUser.id)
-          .single();
-          
-        if (error && error.code !== 'PGRST116') {
-          console.error("Error fetching profile:", error);
-          return;
-        }
-        
-        // If profile exists, update the form with existing data
-        if (profileData) {
-          setFormData({
-            firstName: profileData.first_name || "",
-            lastName: profileData.last_name || "",
-            email: profileData.email || authUser.email || "",
-            phone: profileData.phone || "",
-            address: profileData.address || "",
-            city: profileData.city || "",
-            county: profileData.county || "",  // Changed from state to county
-            postcode: profileData.postcode || "", // Changed from zipCode to postcode
-          });
-        }
-      } catch (err) {
-        console.error("Error in useEffect:", err);
-      }
-    };
+    if (user) {
+      // If user exists, populate the form with their data
+      setFormData({
+        firstName: user.firstName || "",
+        lastName: user.lastName || "",
+        email: user.email || "",
+        phone: user.phone || "",
+        address: user.address || "",
+        city: "", // These fields might not be in the user object
+        county: "", // We'll need to fetch them separately if needed
+        postcode: "",
+      });
 
-    fetchUserProfile();
-  }, []);
+      // Fetch additional address details if needed
+      const fetchAddressDetails = async () => {
+        try {
+          const { data: profileData, error } = await supabase
+            .from("users")
+            .select("city, county, postcode")
+            .eq("id", user.id)
+            .single();
+
+          if (!error && profileData) {
+            setFormData((prev) => ({
+              ...prev,
+              city: profileData.city || "",
+              county: profileData.county || "",
+              postcode: profileData.postcode || "",
+            }));
+          }
+        } catch (err) {
+          console.error("Error fetching address details:", err);
+        }
+      };
+
+      fetchAddressDetails();
+    }
+  }, [user]);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
@@ -88,22 +83,22 @@ export default function ProfileEdit() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    
+
     if (!user) {
       toast({
         title: "Error",
         description: "You must be logged in to update your profile",
-        variant: "destructive"
+        variant: "destructive",
       });
       return;
     }
-    
+
     setLoading(true);
-    
+
     try {
       // Update the user profile in the database
       const { error } = await supabase
-        .from('users')
+        .from("users")
         .update({
           first_name: formData.firstName,
           last_name: formData.lastName,
@@ -111,14 +106,37 @@ export default function ProfileEdit() {
           phone: formData.phone,
           address: formData.address,
           city: formData.city,
-          county: formData.county,       // Changed from state to county
-          postcode: formData.postcode,   // Changed from zipCode to postcode
-          updated_at: new Date()
+          county: formData.county, // Changed from state to county
+          postcode: formData.postcode, // Changed from zipCode to postcode
+          updated_at: new Date(),
         })
-        .eq('id', user.id);
-      
+        .eq("id", user.id);
+
+      console.log("Profile update response:", { error });
+
       if (error) throw error;
-      
+
+      // Update the auth user email if it has changed
+      if (formData.email !== user.email) {
+        const { error: authError } = await supabase.auth.updateUser({
+          email: formData.email,
+        });
+
+        if (authError) throw authError;
+      }
+
+      // We'll handle the database update directly here instead of through updateUserState
+      // to ensure we can update all fields including city, county, and postcode
+
+      // Just update the local state
+      updateUserState({
+        email: formData.email,
+        firstName: formData.firstName,
+        lastName: formData.lastName,
+        address: formData.address,
+        phone: formData.phone,
+      });
+
       toast({
         title: "Success",
         description: "Your profile has been updated successfully",
@@ -128,7 +146,7 @@ export default function ProfileEdit() {
       toast({
         title: "Error",
         description: "Failed to update profile. Please try again.",
-        variant: "destructive"
+        variant: "destructive",
       });
     } finally {
       setLoading(false);
@@ -139,7 +157,10 @@ export default function ProfileEdit() {
     return (
       <Layout>
         <div className="container mx-auto px-4 py-8">
-          <p>Loading...</p>
+          <div className="flex flex-col items-center justify-center py-12">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mb-4"></div>
+            <p className="text-center text-lg">Loading your profile...</p>
+          </div>
         </div>
       </Layout>
     );
@@ -266,7 +287,11 @@ export default function ProfileEdit() {
             </Tabs>
           </CardContent>
           <CardFooter>
-            <Button onClick={handleSubmit} className="w-full md:w-auto" disabled={loading}>
+            <Button
+              onClick={handleSubmit}
+              className="w-full md:w-auto"
+              disabled={loading}
+            >
               <Save className="h-4 w-4 mr-2" />
               {loading ? "Saving..." : "Save Changes"}
             </Button>
