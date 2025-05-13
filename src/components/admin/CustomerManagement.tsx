@@ -190,7 +190,7 @@ const CustomerManagement = () => {
   };
 
   return (
-    <div className="bg-background p-6 h-full">
+    <div className="bg-background p-6 rounded-lg">
       <div className="flex justify-between items-center mb-6">
         <h1 className="text-2xl font-bold">
           Customer Management {totalCustomers !== null && `(${totalCustomers})`}

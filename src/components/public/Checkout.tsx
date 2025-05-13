@@ -25,6 +25,7 @@ import {
 import { useToast } from "@/components/ui/use-toast";
 import { getCurrentUser } from "@/services/supabaseAuthService";
 import { createOrder } from "@/services/orderService";
+import { supabase } from "@/lib/supabase"; // Add this import
 
 interface CartItem {
   id: string;
@@ -39,8 +40,8 @@ export default function Checkout() {
   const [deliveryAddress, setDeliveryAddress] = useState({
     street: "",
     city: "",
-    state: "",
-    zipCode: "",
+    county: "", // Changed from 'state' to 'county' for UK format
+    postcode: "", // Changed from 'zipCode' to 'postcode' for UK format
   });
   const [isProcessing, setIsProcessing] = useState(false);
   const [isComplete, setIsComplete] = useState(false);
@@ -63,32 +64,54 @@ export default function Checkout() {
           return;
         }
         setUser(currentUser);
+        console.log("Current user data:", currentUser);
 
-        // Pre-populate delivery address with user's address if available
-        if (currentUser.address) {
-          try {
-            // Parse the address string into components
-            // Expected format: "123 Main St, Anytown, CA 12345"
-            const addressParts = currentUser.address.split(", ");
+        // Try to directly set address fields from user data
+        // Check if user has profile data with address fields
+        const { data: userData, error } = await supabase
+          .from("users")
+          .select("*")
+          .eq("id", currentUser.id)
+          .single();
 
-            if (addressParts.length >= 3) {
-              const street = addressParts[0];
-              const city = addressParts[1];
-              // The last part might contain both state and zip code
-              const stateZipParts = addressParts[2].split(" ");
-              const state = stateZipParts[0];
-              const zipCode = stateZipParts.length > 1 ? stateZipParts[1] : "";
+        if (!error && userData) {
+          console.log("User data from database:", userData);
+
+          // Set address fields from database columns if they exist
+          const newAddress = {
+            street: userData.address || currentUser.address || "",
+            city: userData.city || "",
+            county: userData.county || "",
+            postcode: userData.postcode || "",
+          };
+
+          console.log("Setting delivery address to:", newAddress);
+          setDeliveryAddress(newAddress);
+        } else {
+          // If there's no specific address fields, try to parse from address string
+          if (currentUser.address) {
+            console.log("Current user address string:", currentUser.address);
+
+            // Simple splitting by comma if it contains commas
+            if (currentUser.address.includes(",")) {
+              const addressParts = currentUser.address
+                .split(",")
+                .map((part) => part.trim());
+              console.log("Address parts from comma splitting:", addressParts);
 
               setDeliveryAddress({
-                street,
-                city,
-                state,
-                zipCode,
+                street: addressParts[0] || "",
+                city: addressParts.length > 1 ? addressParts[1] : "",
+                county: addressParts.length > 2 ? addressParts[2] : "",
+                postcode: addressParts.length > 3 ? addressParts[3] : "",
               });
+            } else {
+              // Just set the street address if there are no commas
+              setDeliveryAddress((prev) => ({
+                ...prev,
+                street: currentUser.address,
+              }));
             }
-          } catch (error) {
-            console.error("Error parsing user address:", error);
-            // If parsing fails, we'll just leave the form empty
           }
         }
 
@@ -142,7 +165,11 @@ export default function Checkout() {
         }
       } catch (err) {
         console.error("Error loading cart and user data:", err);
-        setError("Failed to load checkout data. Please try again later.");
+        setError(
+          err instanceof Error
+            ? err.message
+            : "An error occurred while fetching data",
+        );
       } finally {
         setLoading(false);
       }
@@ -186,8 +213,8 @@ export default function Checkout() {
     if (
       !deliveryAddress.street ||
       !deliveryAddress.city ||
-      !deliveryAddress.state ||
-      !deliveryAddress.zipCode
+      !deliveryAddress.county ||
+      !deliveryAddress.postcode
     ) {
       toast({
         title: "Missing information",
@@ -209,6 +236,14 @@ export default function Checkout() {
     setIsProcessing(true);
 
     try {
+      // Format the address to be saved
+      const formattedAddress = {
+        street: deliveryAddress.street,
+        city: deliveryAddress.city,
+        county: deliveryAddress.county,
+        postcode: deliveryAddress.postcode,
+      };
+
       // Process payment
       const paymentSuccessful = await processPayment(total);
 
@@ -227,7 +262,7 @@ export default function Checkout() {
         user_id: user.id,
         total_amount: total,
         payment_method: paymentMethod,
-        delivery_address: deliveryAddress,
+        delivery_address: formattedAddress,
         items: orderItems,
       });
 
@@ -341,41 +376,41 @@ export default function Checkout() {
                       name="street"
                       value={deliveryAddress.street}
                       onChange={handleAddressChange}
-                      placeholder="123 Main St"
+                      placeholder="123 High Street"
                       required
                     />
                   </div>
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                     <div className="space-y-2">
-                      <Label htmlFor="city">City</Label>
+                      <Label htmlFor="city">City/Town</Label>
                       <Input
                         id="city"
                         name="city"
                         value={deliveryAddress.city}
                         onChange={handleAddressChange}
-                        placeholder="Anytown"
+                        placeholder="Blackburn"
                         required
                       />
                     </div>
                     <div className="space-y-2">
-                      <Label htmlFor="state">State</Label>
+                      <Label htmlFor="county">County</Label>
                       <Input
-                        id="state"
-                        name="state"
-                        value={deliveryAddress.state}
+                        id="county"
+                        name="county"
+                        value={deliveryAddress.county}
                         onChange={handleAddressChange}
-                        placeholder="CA"
+                        placeholder="Lancashire"
                         required
                       />
                     </div>
                     <div className="space-y-2">
-                      <Label htmlFor="zipCode">ZIP Code</Label>
+                      <Label htmlFor="postcode">Postcode</Label>
                       <Input
-                        id="zipCode"
-                        name="zipCode"
-                        value={deliveryAddress.zipCode}
+                        id="postcode"
+                        name="postcode"
+                        value={deliveryAddress.postcode}
                         onChange={handleAddressChange}
-                        placeholder="12345"
+                        placeholder="BB1 2CD"
                         required
                       />
                     </div>

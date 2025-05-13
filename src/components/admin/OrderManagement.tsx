@@ -174,7 +174,7 @@ const OrderManagement = () => {
   };
 
   return (
-    <div className="bg-white p-6 rounded-lg shadow-sm">
+    <div className="bg-background p-6 rounded-lg">
       <h1 className="text-2xl font-bold mb-6">Order Management</h1>
 
       {/* Search and Filter Controls */}

@@ -1,6 +1,5 @@
 import { Suspense, lazy } from "react";
 import { useRoutes, Routes, Route } from "react-router-dom";
-import Home from "./components/home";
 import HomePage from "./components/public/HomePage";
 import ProductsPage from "./components/public/ProductsPage";
 import UserDashboard from "./components/public/UserDashboard";
@@ -19,6 +18,7 @@ const DeliveryPreferences = lazy(
 const Checkout = lazy(() => import("./components/public/Checkout"));
 const Login = lazy(() => import("./components/public/auth/Login"));
 const Signup = lazy(() => import("./components/public/auth/Signup"));
+const AdminDashboard = lazy(() => import("./components/admin/AdminDashboard"));
 
 function App() {
   return (
@@ -34,7 +34,7 @@ function App() {
             path="/admin"
             element={
               <ProtectedRoute requiredRole="admin">
-                <Home />
+                <AdminDashboard />
               </ProtectedRoute>
             }
           />

@@ -76,7 +76,7 @@ const DeliveryManagement = () => {
   };
 
   return (
-    <div className="bg-white p-6 rounded-lg shadow-sm">
+    <div className="bg-background p-6 rounded-lg">
       <h1 className="text-2xl font-bold mb-6">Delivery Management</h1>
 
       <Tabs defaultValue="zones">

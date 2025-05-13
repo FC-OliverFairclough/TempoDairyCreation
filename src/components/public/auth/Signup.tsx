@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import { z } from "zod";
 import { useForm } from "react-hook-form";
@@ -17,6 +17,7 @@ import { signup } from "@/services/supabaseAuthService";
 import Layout from "../Layout";
 import { AlertCircle } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { useUserProfile } from "@/hooks/useUserProfile";
 
 // Form schema
 const signupSchema = z
@@ -44,7 +45,7 @@ export default function Signup() {
   const { user, loading } = useUserProfile();
 
   // Redirect if user is already logged in
-  React.useEffect(() => {
+  useEffect(() => {
     if (user && !loading) {
       navigate("/dashboard");
     }

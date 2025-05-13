@@ -1,13 +1,20 @@
 import React from "react";
 import { Link } from "react-router-dom";
-import { Milk, ShoppingCart, User, LogOut } from "lucide-react";
+import {
+  Milk,
+  ShoppingCart,
+  User,
+  LogOut,
+  LayoutDashboard,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { logout } from "@/services/supabaseAuthService";
+import { logout, getUserRole } from "@/services/supabaseAuthService";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
+  DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
 import { useUserProfile } from "@/hooks/useUserProfile";
 
@@ -17,6 +24,18 @@ interface LayoutProps {
 
 export default function Layout({ children }: LayoutProps) {
   const { user, loading: isLoading } = useUserProfile();
+  const [isAdmin, setIsAdmin] = React.useState(false);
+
+  React.useEffect(() => {
+    const checkAdminRole = async () => {
+      if (user) {
+        const role = await getUserRole();
+        setIsAdmin(role === "admin");
+      }
+    };
+
+    checkAdminRole();
+  }, [user]);
 
   const handleLogout = async () => {
     try {
@@ -102,10 +121,27 @@ export default function Layout({ children }: LayoutProps) {
                     </Link>
                   </DropdownMenuItem>
                   <DropdownMenuItem asChild>
-                    <Link to="/orders" className="w-full cursor-pointer">
+                    <Link to="/order-history" className="w-full cursor-pointer">
                       Order History
                     </Link>
                   </DropdownMenuItem>
+
+                  {isAdmin && (
+                    <>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem asChild>
+                        <Link
+                          to="/admin"
+                          className="w-full cursor-pointer flex items-center"
+                        >
+                          <LayoutDashboard className="h-4 w-4 mr-2" />
+                          Admin Dashboard
+                        </Link>
+                      </DropdownMenuItem>
+                    </>
+                  )}
+
+                  <DropdownMenuSeparator />
                   <DropdownMenuItem
                     onClick={handleLogout}
                     className="cursor-pointer flex items-center text-destructive"
