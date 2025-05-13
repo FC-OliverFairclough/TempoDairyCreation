@@ -41,6 +41,14 @@ export default function Signup() {
   const navigate = useNavigate();
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const { user, loading } = useUserProfile();
+
+  // Redirect if user is already logged in
+  React.useEffect(() => {
+    if (user && !loading) {
+      navigate("/dashboard");
+    }
+  }, [user, loading, navigate]);
 
   const form = useForm<SignupFormValues>({
     resolver: zodResolver(signupSchema),

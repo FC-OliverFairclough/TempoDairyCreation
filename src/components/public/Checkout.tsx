@@ -64,6 +64,34 @@ export default function Checkout() {
         }
         setUser(currentUser);
 
+        // Pre-populate delivery address with user's address if available
+        if (currentUser.address) {
+          try {
+            // Parse the address string into components
+            // Expected format: "123 Main St, Anytown, CA 12345"
+            const addressParts = currentUser.address.split(", ");
+
+            if (addressParts.length >= 3) {
+              const street = addressParts[0];
+              const city = addressParts[1];
+              // The last part might contain both state and zip code
+              const stateZipParts = addressParts[2].split(" ");
+              const state = stateZipParts[0];
+              const zipCode = stateZipParts.length > 1 ? stateZipParts[1] : "";
+
+              setDeliveryAddress({
+                street,
+                city,
+                state,
+                zipCode,
+              });
+            }
+          } catch (error) {
+            console.error("Error parsing user address:", error);
+            // If parsing fails, we'll just leave the form empty
+          }
+        }
+
         // Load cart from localStorage
         const savedCart = localStorage.getItem("milkman_cart");
         if (savedCart) {

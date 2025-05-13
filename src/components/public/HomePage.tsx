@@ -4,8 +4,10 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import Layout from "./Layout";
 import { Truck, Clock, ThumbsUp, CalendarCheck } from "lucide-react";
+import { useUserProfile } from "@/hooks/useUserProfile";
 
 export default function HomePage() {
+  const { user } = useUserProfile();
   return (
     <Layout>
       {/* Hero Section */}
@@ -24,9 +26,15 @@ export default function HomePage() {
               <Button size="lg" asChild>
                 <Link to="/products">Browse Products</Link>
               </Button>
-              <Button size="lg" variant="outline" asChild>
-                <Link to="/signup">Sign Up Now</Link>
-              </Button>
+              {!user ? (
+                <Button size="lg" variant="outline" asChild>
+                  <Link to="/signup">Sign Up Now</Link>
+                </Button>
+              ) : (
+                <Button size="lg" variant="outline" asChild>
+                  <Link to="/dashboard">My Dashboard</Link>
+                </Button>
+              )}
             </div>
           </div>
           <div className="md:w-1/2">
@@ -112,9 +120,15 @@ export default function HomePage() {
             Join hundreds of satisfied customers who enjoy fresh dairy products
             delivered to their door.
           </p>
-          <Button size="lg" asChild>
-            <Link to="/signup">Create an Account</Link>
-          </Button>
+          {!user ? (
+            <Button size="lg" asChild>
+              <Link to="/signup">Create an Account</Link>
+            </Button>
+          ) : (
+            <Button size="lg" asChild>
+              <Link to="/dashboard">Go to Dashboard</Link>
+            </Button>
+          )}
         </div>
       </section>
     </Layout>
