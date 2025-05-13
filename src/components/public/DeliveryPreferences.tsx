@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { supabase } from "@/lib/supabase";
+import { Link } from "react-router-dom";
 import Layout from "./Layout";
 import { Button } from "@/components/ui/button";
 import {
@@ -12,16 +13,7 @@ import {
 } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
-import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { Switch } from "@/components/ui/switch";
-import { CalendarDays, Clock, Save, Truck } from "lucide-react";
+import { CalendarDays, Save, ArrowLeft } from "lucide-react";
 import { useToast } from "@/components/ui/use-toast";
 import { useUserProfile } from "@/hooks/useUserProfile";
 
@@ -35,10 +27,8 @@ export default function DeliveryPreferences() {
       wednesday: true,
       friday: true,
     },
-    timeSlot: "morning",
-    specialInstructions: "",
-    contactBeforeDelivery: false,
-    leaveAtDoor: true,
+    saved_address: "",
+    delivery_notes: "",
   });
 
   useEffect(() => {
@@ -46,6 +36,7 @@ export default function DeliveryPreferences() {
       if (!user) return;
 
       try {
+        setLoading(true);
         // Fetch the user's delivery preferences
         const { data: preferencesData, error } = await supabase
           .from("delivery_preferences")
@@ -60,21 +51,34 @@ export default function DeliveryPreferences() {
 
         // If preferences exist, update the state with existing data
         if (preferencesData) {
+          // Handle both formats: specific columns or preferred_days array
+          const monday =
+            preferencesData.monday ||
+            (preferencesData.preferred_days &&
+              preferencesData.preferred_days.includes("monday"));
+          const wednesday =
+            preferencesData.wednesday ||
+            (preferencesData.preferred_days &&
+              preferencesData.preferred_days.includes("wednesday"));
+          const friday =
+            preferencesData.friday ||
+            (preferencesData.preferred_days &&
+              preferencesData.preferred_days.includes("friday"));
+
           setPreferences({
             deliveryDays: {
-              monday: preferencesData.monday || false,
-              wednesday: preferencesData.wednesday || true,
-              friday: preferencesData.friday || true,
+              monday: monday || false,
+              wednesday: wednesday || true,
+              friday: friday || true,
             },
-            timeSlot: preferencesData.time_slot || "morning",
-            specialInstructions: preferencesData.special_instructions || "",
-            contactBeforeDelivery:
-              preferencesData.contact_before_delivery || false,
-            leaveAtDoor: preferencesData.leave_at_door || true,
+            saved_address: preferencesData.saved_address || "",
+            delivery_notes: preferencesData.delivery_notes || "",
           });
         }
       } catch (err) {
         console.error("Error in useEffect:", err);
+      } finally {
+        setLoading(false);
       }
     };
 
@@ -88,20 +92,6 @@ export default function DeliveryPreferences() {
         ...prev.deliveryDays,
         [day]: !prev.deliveryDays[day as keyof typeof prev.deliveryDays],
       },
-    }));
-  };
-
-  const handleTimeSlotChange = (value: string) => {
-    setPreferences((prev) => ({
-      ...prev,
-      timeSlot: value,
-    }));
-  };
-
-  const handleSwitchChange = (field: string, checked: boolean) => {
-    setPreferences((prev) => ({
-      ...prev,
-      [field]: checked,
     }));
   };
 
@@ -121,6 +111,12 @@ export default function DeliveryPreferences() {
     setLoading(true);
 
     try {
+      // Convert boolean object to string array for preferred_days
+      const preferredDays: string[] = [];
+      if (preferences.deliveryDays.monday) preferredDays.push("monday");
+      if (preferences.deliveryDays.wednesday) preferredDays.push("wednesday");
+      if (preferences.deliveryDays.friday) preferredDays.push("friday");
+
       // Check if preferences already exist for this user
       const { data: existingPrefs, error: checkError } = await supabase
         .from("delivery_preferences")
@@ -128,36 +124,31 @@ export default function DeliveryPreferences() {
         .eq("user_id", user.id)
         .single();
 
+      // Prepare the data for insert/update based on your table structure
+      const preferencesData = {
+        user_id: user.id,
+        preferred_days: preferredDays,
+        monday: preferences.deliveryDays.monday,
+        wednesday: preferences.deliveryDays.wednesday,
+        friday: preferences.deliveryDays.friday,
+        time_slot: "11pm - 7am",
+        saved_address: preferences.saved_address,
+        delivery_notes: preferences.delivery_notes,
+        updated_at: new Date(),
+      };
+
       let result;
 
       if (checkError && checkError.code === "PGRST116") {
         // No existing preferences, insert new record
-        result = await supabase.from("delivery_preferences").insert([
-          {
-            user_id: user.id,
-            monday: preferences.deliveryDays.monday,
-            wednesday: preferences.deliveryDays.wednesday,
-            friday: preferences.deliveryDays.friday,
-            time_slot: preferences.timeSlot,
-            special_instructions: preferences.specialInstructions,
-            contact_before_delivery: preferences.contactBeforeDelivery,
-            leave_at_door: preferences.leaveAtDoor,
-          },
-        ]);
+        result = await supabase
+          .from("delivery_preferences")
+          .insert([preferencesData]);
       } else {
         // Update existing preferences
         result = await supabase
           .from("delivery_preferences")
-          .update({
-            monday: preferences.deliveryDays.monday,
-            wednesday: preferences.deliveryDays.wednesday,
-            friday: preferences.deliveryDays.friday,
-            time_slot: preferences.timeSlot,
-            special_instructions: preferences.specialInstructions,
-            contact_before_delivery: preferences.contactBeforeDelivery,
-            leave_at_door: preferences.leaveAtDoor,
-            updated_at: new Date(),
-          })
+          .update(preferencesData)
           .eq("user_id", user.id);
       }
 
@@ -195,17 +186,30 @@ export default function DeliveryPreferences() {
   return (
     <Layout>
       <div className="container mx-auto px-4 py-8">
+        {/* Back button */}
+        <div className="mb-6">
+          <Button
+            variant="outline"
+            size="sm"
+            asChild
+            className="flex items-center"
+          >
+            <Link to="/dashboard">
+              <ArrowLeft className="h-4 w-4 mr-2" />
+              Back to Dashboard
+            </Link>
+          </Button>
+        </div>
+
         <div className="flex items-center mb-8">
-          <Truck className="h-6 w-6 mr-2 text-primary" />
+          <CalendarDays className="h-6 w-6 mr-2 text-primary" />
           <h1 className="text-3xl font-bold">Delivery Preferences</h1>
         </div>
 
         <Card className="max-w-3xl mx-auto bg-card">
           <CardHeader>
             <CardTitle>Customize Your Deliveries</CardTitle>
-            <CardDescription>
-              Set your preferred delivery days, times, and special instructions
-            </CardDescription>
+            <CardDescription>Set your preferred delivery days</CardDescription>
           </CardHeader>
           <CardContent className="space-y-6">
             <div className="space-y-3">
@@ -246,71 +250,18 @@ export default function DeliveryPreferences() {
 
             <div className="space-y-3">
               <div className="flex items-center">
-                <Clock className="h-5 w-5 mr-2 text-primary" />
-                <h3 className="text-lg font-medium">Preferred Time Slot</h3>
+                <h3 className="text-lg font-medium">Delivery Time</h3>
               </div>
-              <RadioGroup
-                value={preferences.timeSlot}
-                onValueChange={handleTimeSlotChange}
-                className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-2"
-              >
-                <div className="flex items-center space-x-2">
-                  <RadioGroupItem value="morning" id="morning" />
-                  <Label htmlFor="morning">Morning (6am - 10am)</Label>
-                </div>
-                <div className="flex items-center space-x-2">
-                  <RadioGroupItem value="midday" id="midday" />
-                  <Label htmlFor="midday">Midday (10am - 2pm)</Label>
-                </div>
-                <div className="flex items-center space-x-2">
-                  <RadioGroupItem value="afternoon" id="afternoon" />
-                  <Label htmlFor="afternoon">Afternoon (2pm - 6pm)</Label>
-                </div>
-              </RadioGroup>
-            </div>
-
-            <div className="space-y-3">
-              <h3 className="text-lg font-medium">Delivery Options</h3>
-              <div className="space-y-4">
-                <div className="flex items-center justify-between">
-                  <div className="space-y-0.5">
-                    <Label htmlFor="contact">Contact Before Delivery</Label>
-                    <p className="text-sm text-muted-foreground">
-                      We'll call or text you before arriving
-                    </p>
-                  </div>
-                  <Switch
-                    id="contact"
-                    checked={preferences.contactBeforeDelivery}
-                    onCheckedChange={(checked) =>
-                      handleSwitchChange("contactBeforeDelivery", checked)
-                    }
-                  />
-                </div>
-                <div className="flex items-center justify-between">
-                  <div className="space-y-0.5">
-                    <Label htmlFor="leaveAtDoor">Leave at Door</Label>
-                    <p className="text-sm text-muted-foreground">
-                      We'll leave your order at the door if you're not home
-                    </p>
-                  </div>
-                  <Switch
-                    id="leaveAtDoor"
-                    checked={preferences.leaveAtDoor}
-                    onCheckedChange={(checked) =>
-                      handleSwitchChange("leaveAtDoor", checked)
-                    }
-                  />
-                </div>
-              </div>
+              <p className="text-sm text-muted-foreground">
+                Your delivery will arrive between 11pm - 7am
+              </p>
             </div>
           </CardContent>
-          <CardFooter>
-            <Button
-              onClick={handleSubmit}
-              className="w-full md:w-auto"
-              disabled={loading}
-            >
+          <CardFooter className="flex justify-between">
+            <Button variant="outline" asChild>
+              <Link to="/dashboard">Cancel</Link>
+            </Button>
+            <Button onClick={handleSubmit} disabled={loading}>
               {loading ? (
                 <>
                   <div className="h-4 w-4 mr-2 animate-spin rounded-full border-2 border-background border-t-transparent"></div>
