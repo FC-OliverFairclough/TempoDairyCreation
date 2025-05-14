@@ -17,6 +17,7 @@ import OrderManagement from "./OrderManagement";
 import ProductCatalog from "./ProductCatalog";
 import DeliveryManagement from "./DeliveryManagement";
 import CustomerManagement from "./CustomerManagement";
+import CustomerStatistics from "./CustomerStatistics";
 import { isAdmin } from "@/services/supabaseAuthService";
 
 export default function AdminDashboard() {

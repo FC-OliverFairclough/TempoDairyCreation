@@ -113,18 +113,19 @@ const CustomerManagement = () => {
         if (error) throw error;
 
         // Transform orders data
-        const transformedOrders = ordersData.map((order: any) => ({
-          id: order.id,
-          date: order.delivery_date,
-          products:
-            order.order_items?.map((item: any) => ({
-              name: item.products?.name || "Unknown Product",
-              quantity: item.quantity,
-              price: item.price,
-            })) || [],
-          total: order.total_amount,
-          status: order.order_status,
-        }));
+        const transformedOrders =
+          ordersData?.map((order: any) => ({
+            id: order.id,
+            date: order.delivery_date,
+            products:
+              order.order_items?.map((item: any) => ({
+                name: item.products?.name || "Unknown Product",
+                quantity: item.quantity,
+                price: item.price,
+              })) || [],
+            total: order.total_amount || 0,
+            status: order.order_status || "pending",
+          })) || [];
 
         setCustomerOrders(transformedOrders);
       } catch (error) {
@@ -703,9 +704,14 @@ const CustomerManagement = () => {
                 onClick={async () => {
                   if (selectedCustomer) {
                     try {
-                      // Map to Supabase format
+                      // Map to Supabase format - split name into first_name and last_name
+                      const nameParts = selectedCustomer.name.split(" ");
+                      const firstName = nameParts[0] || "";
+                      const lastName = nameParts.slice(1).join(" ") || "";
+
                       const supabaseData = {
-                        name: selectedCustomer.name,
+                        first_name: firstName,
+                        last_name: lastName,
                         email: selectedCustomer.email,
                         phone: selectedCustomer.phone,
                         address: selectedCustomer.address,
@@ -713,7 +719,7 @@ const CustomerManagement = () => {
                       };
 
                       await updateSupabaseRecord(
-                        "customers",
+                        "users",
                         selectedCustomer.id,
                         supabaseData,
                       );
