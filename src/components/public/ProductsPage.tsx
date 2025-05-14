@@ -29,7 +29,7 @@ export default function ProductsPage() {
 
   // Load cart from localStorage on component mount
   useEffect(() => {
-    const savedCart = localStorage.getItem("milkman_cart");
+    const savedCart = localStorage.getItem("cart");
     if (savedCart) {
       try {
         setCart(JSON.parse(savedCart));
@@ -41,7 +41,7 @@ export default function ProductsPage() {
 
   // Save cart to localStorage whenever it changes
   useEffect(() => {
-    localStorage.setItem("milkman_cart", JSON.stringify(cart));
+    localStorage.setItem("cart", JSON.stringify(cart));
   }, [cart]);
 
   // Mock product data
@@ -128,7 +128,7 @@ export default function ProductsPage() {
         setProducts(mockProducts);
 
         // Store products in localStorage for cart reference
-        localStorage.setItem("milkman_products", JSON.stringify(mockProducts));
+        localStorage.setItem("products", JSON.stringify(mockProducts));
       } catch (err) {
         console.error("Error loading products:", err);
         setError("Failed to load products. Please try again later.");

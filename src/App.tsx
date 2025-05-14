@@ -32,6 +32,7 @@ function App() {
           <Route path="/" element={<HomePage />} />
           <Route path="/products" element={<ProductsPage />} />
           <Route path="/cart" element={<CartPage />} />
+          <Route path="/checkout" element={<Checkout />} />
           <Route path="/about" element={<AboutPage />} />
           <Route path="/contact" element={<ContactPage />} />
           <Route
@@ -76,7 +77,6 @@ function App() {
               </ProtectedRoute>
             }
           />
-          <Route path="/checkout" element={<Checkout />} />
           <Route
             path="/order-confirmation"
             element={

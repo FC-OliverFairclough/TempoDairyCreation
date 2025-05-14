@@ -53,7 +53,7 @@ export default function Checkout() {
     const loadCartItems = () => {
       try {
         // Load cart from localStorage
-        const savedCart = localStorage.getItem("milkman_cart");
+        const savedCart = localStorage.getItem("cart");
         if (savedCart) {
           const cartData = JSON.parse(savedCart);
 

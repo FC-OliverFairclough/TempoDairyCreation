@@ -22,19 +22,38 @@ export async function createCheckoutSession({
   deliveryDate: string;
 }) {
   try {
-    const { data, error } = await supabase.functions.invoke(
-      "create-checkout-session",
+    console.log("Creating checkout session with:", {
+      products,
+      userId,
+      deliveryAddress,
+      deliveryDate,
+    });
+
+    // Direct fetch to the edge function URL instead of using the invoke method
+    const response = await fetch(
+      `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/create-checkout-session`,
       {
-        body: {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
+        },
+        body: JSON.stringify({
           products,
           userId,
           deliveryAddress,
           deliveryDate,
-        },
+        }),
       },
     );
 
-    if (error) throw new Error(error.message);
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Error ${response.status}: ${errorText}`);
+    }
+
+    const data = await response.json();
+    if (data.error) throw new Error(data.error.message);
     return data;
   } catch (error) {
     console.error("Error creating checkout session:", error);
