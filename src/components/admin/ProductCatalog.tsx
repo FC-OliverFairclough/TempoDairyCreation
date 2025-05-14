@@ -52,6 +52,7 @@ import {
   deleteSupabaseRecord,
 } from "@/hooks/useSupabaseData";
 import { supabase } from "@/lib/supabase";
+import { useToast } from "@/components/ui/use-toast";
 
 interface Product {
   id: string;
@@ -68,6 +69,7 @@ const ProductCatalog = () => {
   // State for search and filter
   const [searchTerm, setSearchTerm] = useState("");
   const [showUnavailable, setShowUnavailable] = useState(true);
+  const { toast } = useToast();
 
   // Fetch products from Supabase
   const {
@@ -75,10 +77,11 @@ const ProductCatalog = () => {
     loading,
     error,
     count: totalProducts,
+    refetch,
   } = useSupabaseData<Product>({
     table: "products",
     columns: "*",
-    filters: showUnavailable ? {} : { available: true },
+    filters: showUnavailable ? {} : { is_available: true },
     orderBy: { column: "name", ascending: true },
   });
 
@@ -95,7 +98,7 @@ const ProductCatalog = () => {
         description: product.description,
         price: product.price,
         category: product.category,
-        available: product.available,
+        available: product.is_available, // Map from is_available to available in our interface
         stock: product.stock,
         image: product.image_url,
       }));
@@ -108,6 +111,7 @@ const ProductCatalog = () => {
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const [currentProduct, setCurrentProduct] = useState<Product | null>(null);
   const [isEditing, setIsEditing] = useState(false);
+  const [statusUpdating, setStatusUpdating] = useState<string | null>(null);
 
   // Filter products based on search term and availability
   const filteredProducts = products.filter((product) => {
@@ -122,7 +126,7 @@ const ProductCatalog = () => {
   // Handle adding a new product
   const handleAddProduct = () => {
     setCurrentProduct({
-      id: Date.now().toString(),
+      id: "",
       name: "",
       description: "",
       price: 0,
@@ -158,7 +162,7 @@ const ProductCatalog = () => {
         description: currentProduct.description,
         price: currentProduct.price,
         category: currentProduct.category,
-        available: currentProduct.available,
+        is_available: currentProduct.available, // Use is_available field for the database
         stock: currentProduct.stock,
         image_url: currentProduct.image,
       };
@@ -166,17 +170,57 @@ const ProductCatalog = () => {
       if (isEditing) {
         // Update existing product in Supabase
         await updateSupabaseRecord("products", currentProduct.id, supabaseData);
+
+        // Optimistically update the UI
+        setProducts((prevProducts) =>
+          prevProducts.map((p) =>
+            p.id === currentProduct.id ? { ...p, ...currentProduct } : p,
+          ),
+        );
+
+        toast({
+          title: "Product updated",
+          description: `${currentProduct.name} has been updated successfully`,
+        });
       } else {
         // Add new product to Supabase
-        await createSupabaseRecord("products", supabaseData);
+        const newProduct = await createSupabaseRecord("products", supabaseData);
+
+        // Add the new product to the UI
+        if (newProduct) {
+          setProducts((prevProducts) => [
+            ...prevProducts,
+            {
+              id: newProduct.id,
+              name: newProduct.name,
+              description: newProduct.description,
+              price: newProduct.price,
+              category: newProduct.category,
+              available: newProduct.available,
+              stock: newProduct.stock,
+              image: newProduct.image_url,
+            },
+          ]);
+        }
+
+        toast({
+          title: "Product created",
+          description: `${currentProduct.name} has been added successfully`,
+        });
       }
 
       setIsDialogOpen(false);
       setCurrentProduct(null);
-      // Data will refresh automatically via useSupabaseData
+
+      // Refresh data from database
+      refetch();
     } catch (error) {
       console.error("Error saving product:", error);
-      // Could add error handling UI here
+      toast({
+        title: "Error",
+        description: `Failed to ${isEditing ? "update" : "create"} product. Please try again.`,
+        variant: "destructive",
+      });
     }
   };
 
@@ -188,31 +232,78 @@ const ProductCatalog = () => {
       // Delete product from Supabase
       await deleteSupabaseRecord("products", currentProduct.id);
 
+      // Remove the product from the UI
+      setProducts((prevProducts) =>
+        prevProducts.filter((p) => p.id !== currentProduct.id),
+      );
+
+      toast({
+        title: "Product deleted",
+        description: `${currentProduct.name} has been deleted successfully`,
+      });
+
       setIsDeleteDialogOpen(false);
       setCurrentProduct(null);
-      // Data will refresh automatically via useSupabaseData
     } catch (error) {
       console.error("Error deleting product:", error);
-      // Could add error handling UI here
+      toast({
+        title: "Error",
+        description: "Failed to delete product. Please try again.",
+        variant: "destructive",
+      });
     }
   };
 
   // Handle toggling product availability
   const handleToggleAvailability = async (id: string) => {
     try {
+      setStatusUpdating(id);
+
       // Find the product
       const product = products.find((p) => p.id === id);
       if (!product) return;
 
+      console.log(
+        `Toggling product ${id} availability from ${product.available} to ${!product.available}`,
+      );
+
       // Update availability in Supabase
-      await updateSupabaseRecord("products", id, {
-        available: !product.available,
+      // This is the critical fix - using is_available instead of available
+      const result = await supabase
+        .from("products")
+        .update({ is_available: !product.available })
+        .eq("id", id);
+
+      if (result.error) {
+        console.error("Supabase update error:", result.error);
+        throw result.error;
+      }
+
+      console.log("Database update result:", result);
+
+      // Update the product in the UI
+      setProducts((prevProducts) =>
+        prevProducts.map((p) =>
+          p.id === id ? { ...p, available: !p.available } : p,
+        ),
+      );
+
+      toast({
+        title: "Status updated",
+        description: `Product is now ${!product.available ? "available" : "unavailable"}`,
       });
 
-      // Data will refresh automatically via useSupabaseData
+      // Refresh data to ensure UI is in sync with database
+      setTimeout(() => refetch(), 500);
     } catch (error) {
       console.error("Error toggling product availability:", error);
-      // Could add error handling UI here
+      toast({
+        title: "Error",
+        description: "Failed to update product status. Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setStatusUpdating(null);
     }
   };
 
@@ -315,13 +406,17 @@ const ProductCatalog = () => {
                         </TableCell>
                         <TableCell className="text-center">
                           <div className="flex items-center justify-center">
-                            <Switch
-                              checked={product.available}
-                              onCheckedChange={() =>
-                                handleToggleAvailability(product.id)
-                              }
-                              className="data-[state=checked]:bg-green-500"
-                            />
+                            {statusUpdating === product.id ? (
+                              <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                            ) : (
+                              <Switch
+                                checked={product.available}
+                                onCheckedChange={() =>
+                                  handleToggleAvailability(product.id)
+                                }
+                                className="data-[state=checked]:bg-green-500"
+                              />
+                            )}
                             <span className="ml-2 text-sm">
                               {product.available ? "Available" : "Unavailable"}
                             </span>
