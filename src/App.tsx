@@ -16,6 +16,9 @@ const DeliveryPreferences = lazy(
   () => import("./components/public/DeliveryPreferences"),
 );
 const Checkout = lazy(() => import("./components/public/Checkout"));
+const OrderConfirmation = lazy(
+  () => import("./components/public/OrderConfirmation"),
+);
 const Login = lazy(() => import("./components/public/auth/Login"));
 const Signup = lazy(() => import("./components/public/auth/Signup"));
 const AdminDashboard = lazy(() => import("./components/admin/AdminDashboard"));
@@ -77,6 +80,14 @@ function App() {
             element={
               <ProtectedRoute>
                 <Checkout />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/order-confirmation"
+            element={
+              <ProtectedRoute>
+                <OrderConfirmation />
               </ProtectedRoute>
             }
           />

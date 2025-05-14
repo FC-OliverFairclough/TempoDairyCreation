@@ -1,11 +1,10 @@
-import { useState, useEffect } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import React, { useState, useEffect } from "react";
+import { Link, useNavigate, useLocation } from "react-router-dom";
 import Layout from "./Layout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
-import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import {
   Card,
   CardContent,
@@ -19,104 +18,42 @@ import {
   MapPin,
   ShoppingCart,
   Truck,
-  Check,
+  Loader2,
   AlertCircle,
+  Calendar,
 } from "lucide-react";
 import { useToast } from "@/components/ui/use-toast";
-import { getCurrentUser } from "@/services/supabaseAuthService";
-import { createOrder } from "@/services/orderService";
-import { supabase } from "@/lib/supabase"; // Add this import
+import { useUserProfile } from "@/hooks/useUserProfile";
+import {
+  createCheckoutSession,
+  redirectToCheckout,
+} from "@/services/stripeService";
 
 interface CartItem {
   id: string;
   name: string;
-  quantity: number;
+  description?: string;
   price: number;
+  quantity: number;
+  image?: string;
 }
 
 export default function Checkout() {
-  const [cartItems, setCartItems] = useState<CartItem[]>([]);
-  const [paymentMethod, setPaymentMethod] = useState("card");
-  const [deliveryAddress, setDeliveryAddress] = useState({
-    street: "",
-    city: "",
-    county: "", // Changed from 'state' to 'county' for UK format
-    postcode: "", // Changed from 'zipCode' to 'postcode' for UK format
-  });
-  const [isProcessing, setIsProcessing] = useState(false);
-  const [isComplete, setIsComplete] = useState(false);
-  const [orderId, setOrderId] = useState<string>("");
-  const [user, setUser] = useState<any>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const { toast } = useToast();
   const navigate = useNavigate();
+  const location = useLocation();
+  const { toast } = useToast();
+  const { user } = useUserProfile();
+  const [isLoading, setIsLoading] = useState(false);
+  const [cartItems, setCartItems] = useState<CartItem[]>([]);
+  const [deliveryAddress, setDeliveryAddress] = useState("");
+  const [deliveryDate, setDeliveryDate] = useState("");
 
-  // Load cart from localStorage on component mount
+  // Get cart items from localStorage on component mount
   useEffect(() => {
-    const loadCartAndUser = async () => {
+    const loadCartItems = () => {
       try {
-        // Get current user
-        const currentUser = await getCurrentUser();
-        if (!currentUser) {
-          // Redirect to login if not authenticated
-          navigate("/login");
-          return;
-        }
-        setUser(currentUser);
-        console.log("Current user data:", currentUser);
-
-        // Try to directly set address fields from user data
-        // Check if user has profile data with address fields
-        const { data: userData, error } = await supabase
-          .from("users")
-          .select("*")
-          .eq("id", currentUser.id)
-          .single();
-
-        if (!error && userData) {
-          console.log("User data from database:", userData);
-
-          // Set address fields from database columns if they exist
-          const newAddress = {
-            street: userData.address || currentUser.address || "",
-            city: userData.city || "",
-            county: userData.county || "",
-            postcode: userData.postcode || "",
-          };
-
-          console.log("Setting delivery address to:", newAddress);
-          setDeliveryAddress(newAddress);
-        } else {
-          // If there's no specific address fields, try to parse from address string
-          if (currentUser.address) {
-            console.log("Current user address string:", currentUser.address);
-
-            // Simple splitting by comma if it contains commas
-            if (currentUser.address.includes(",")) {
-              const addressParts = currentUser.address
-                .split(",")
-                .map((part) => part.trim());
-              console.log("Address parts from comma splitting:", addressParts);
-
-              setDeliveryAddress({
-                street: addressParts[0] || "",
-                city: addressParts.length > 1 ? addressParts[1] : "",
-                county: addressParts.length > 2 ? addressParts[2] : "",
-                postcode: addressParts.length > 3 ? addressParts[3] : "",
-              });
-            } else {
-              // Just set the street address if there are no commas
-              setDeliveryAddress((prev) => ({
-                ...prev,
-                street: currentUser.address,
-              }));
-            }
-          }
-        }
-
         // Load cart from localStorage
-        const savedCart = localStorage.getItem("milkman_cart");
+        const savedCart = localStorage.getItem("cart");
         if (savedCart) {
           const cartData = JSON.parse(savedCart);
 
@@ -124,7 +61,7 @@ export default function Checkout() {
           const cartItemsArray: CartItem[] = [];
 
           // If we have products in localStorage, use them
-          const productsData = localStorage.getItem("milkman_products");
+          const productsData = localStorage.getItem("products");
           if (productsData) {
             const products = JSON.parse(productsData);
 
@@ -134,49 +71,62 @@ export default function Checkout() {
               if (product) {
                 cartItemsArray.push({
                   id: productId,
-                  name: product.title,
-                  quantity: quantity as number,
+                  name: product.name || product.title,
+                  description: product.description,
                   price: product.price,
+                  quantity: quantity as number,
+                  image: product.image_url,
                 });
               }
-            });
-          } else {
-            // Fallback to mock data if no products in localStorage
-            toast({
-              title: "Cart data incomplete",
-              description: "Some product information could not be loaded",
-              variant: "destructive",
             });
           }
 
           if (cartItemsArray.length > 0) {
             setCartItems(cartItemsArray);
           } else {
-            setError(
-              "Your cart is empty. Please add some products before checkout.",
-            );
-            setTimeout(() => navigate("/products"), 3000);
+            toast({
+              title: "Empty cart",
+              description:
+                "Your cart is empty. Please add products before checkout.",
+              variant: "destructive",
+            });
+            navigate("/products");
           }
         } else {
-          setError(
-            "Your cart is empty. Please add some products before checkout.",
-          );
-          setTimeout(() => navigate("/products"), 3000);
+          toast({
+            title: "Empty cart",
+            description:
+              "Your cart is empty. Please add products before checkout.",
+            variant: "destructive",
+          });
+          navigate("/products");
         }
-      } catch (err) {
-        console.error("Error loading cart and user data:", err);
-        setError(
-          err instanceof Error
-            ? err.message
-            : "An error occurred while fetching data",
-        );
-      } finally {
-        setLoading(false);
+      } catch (error) {
+        console.error("Error loading cart data:", error);
+        toast({
+          title: "Error",
+          description: "There was a problem loading your cart data.",
+          variant: "destructive",
+        });
       }
     };
 
-    loadCartAndUser();
-  }, [navigate, toast]);
+    // Set default delivery address from user profile
+    if (user) {
+      const fullAddress = [user.address, user.city, user.county, user.postcode]
+        .filter(Boolean)
+        .join(", ");
+
+      setDeliveryAddress(fullAddress || "");
+    }
+
+    // Set default delivery date to tomorrow
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    setDeliveryDate(tomorrow.toISOString().split("T")[0]);
+
+    loadCartItems();
+  }, [navigate, toast, user]);
 
   const subtotal = cartItems.reduce(
     (sum, item) => sum + item.price * item.quantity,
@@ -185,165 +135,71 @@ export default function Checkout() {
   const deliveryFee = 2.99;
   const total = subtotal + deliveryFee;
 
-  const handleAddressChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const { name, value } = e.target;
-    setDeliveryAddress((prev) => ({
-      ...prev,
-      [name]: value,
-    }));
-  };
-
-  // Mock payment processing function
-  const processPayment = async (amount: number): Promise<boolean> => {
-    // In a real app, this would integrate with Stripe or another payment processor
-    return new Promise((resolve) => {
-      // Simulate API call delay
-      setTimeout(() => {
-        // Simulate successful payment (would be actual API response in production)
-        const isSuccessful = true;
-        resolve(isSuccessful);
-      }, 1500);
-    });
-  };
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-
-    // Validate form
-    if (
-      !deliveryAddress.street ||
-      !deliveryAddress.city ||
-      !deliveryAddress.county ||
-      !deliveryAddress.postcode
-    ) {
+  const handleCheckout = async () => {
+    if (!user) {
       toast({
-        title: "Missing information",
-        description: "Please fill in all address fields",
         variant: "destructive",
+        title: "Authentication required",
+        description: "Please log in to complete your order.",
+      });
+      navigate("/login", { state: { from: location } });
+      return;
+    }
+
+    if (!deliveryAddress) {
+      toast({
+        variant: "destructive",
+        title: "Delivery address required",
+        description: "Please enter a delivery address.",
       });
       return;
     }
 
-    if (cartItems.length === 0) {
+    if (!deliveryDate) {
       toast({
-        title: "Empty cart",
-        description: "Your cart is empty. Please add products before checkout.",
         variant: "destructive",
+        title: "Delivery date required",
+        description: "Please select a delivery date.",
       });
       return;
     }
-
-    setIsProcessing(true);
 
     try {
-      // Format the address to be saved
-      const formattedAddress = {
-        street: deliveryAddress.street,
-        city: deliveryAddress.city,
-        county: deliveryAddress.county,
-        postcode: deliveryAddress.postcode,
-      };
+      setIsLoading(true);
 
-      // Process payment
-      const paymentSuccessful = await processPayment(total);
-
-      if (!paymentSuccessful) {
-        throw new Error("Payment processing failed");
-      }
-
-      // Create order in database
-      const orderItems = cartItems.map((item) => ({
-        product_id: item.id,
-        quantity: item.quantity,
-        price: item.price,
-      }));
-
-      const newOrderId = await createOrder({
-        user_id: user.id,
-        total_amount: total,
-        payment_method: paymentMethod,
-        delivery_address: formattedAddress,
-        items: orderItems,
+      const { sessionId, url } = await createCheckoutSession({
+        products: cartItems,
+        userId: user.id,
+        deliveryAddress,
+        deliveryDate,
       });
 
-      // Clear cart from localStorage
-      localStorage.removeItem("milkman_cart");
-
-      // Set order ID for confirmation page
-      setOrderId(newOrderId);
-      setIsComplete(true);
-    } catch (err) {
-      console.error("Error processing order:", err);
+      // Redirect to Stripe checkout
+      if (url) {
+        window.location.href = url;
+      } else {
+        await redirectToCheckout(sessionId);
+      }
+    } catch (error) {
+      console.error("Checkout error:", error);
       toast({
-        title: "Order processing failed",
-        description:
-          "There was an error processing your order. Please try again.",
         variant: "destructive",
+        title: "Checkout failed",
+        description:
+          "There was a problem processing your order. Please try again.",
       });
     } finally {
-      setIsProcessing(false);
+      setIsLoading(false);
     }
   };
 
-  if (loading) {
+  if (isLoading) {
     return (
       <Layout>
         <div className="container mx-auto px-4 py-8 flex justify-center items-center min-h-[50vh]">
           <div className="flex flex-col items-center">
-            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mb-4"></div>
-            <p className="text-center text-lg">Loading checkout...</p>
-          </div>
-        </div>
-      </Layout>
-    );
-  }
-
-  if (error) {
-    return (
-      <Layout>
-        <div className="container mx-auto px-4 py-8">
-          <div className="max-w-md mx-auto text-center">
-            <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-red-100 mb-6">
-              <AlertCircle className="h-8 w-8 text-red-600" />
-            </div>
-            <h1 className="text-2xl font-bold mb-4">Checkout Error</h1>
-            <p className="text-muted-foreground mb-8">{error}</p>
-            <Button asChild className="w-full">
-              <Link to="/products">Browse Products</Link>
-            </Button>
-          </div>
-        </div>
-      </Layout>
-    );
-  }
-
-  if (isComplete) {
-    return (
-      <Layout>
-        <div className="container mx-auto px-4 py-12">
-          <div className="max-w-md mx-auto text-center">
-            <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-green-100 mb-6">
-              <Check className="h-8 w-8 text-green-600" />
-            </div>
-            <h1 className="text-3xl font-bold mb-4">Order Confirmed!</h1>
-            <p className="text-muted-foreground mb-8">
-              Thank you for your order. We've received your payment and will
-              deliver your items on the next delivery day.
-            </p>
-            <div className="bg-muted p-4 rounded-md mb-8">
-              <p className="font-medium">Order #{orderId.slice(0, 8)}</p>
-              <p className="text-sm text-muted-foreground">
-                A confirmation has been sent to your email
-              </p>
-            </div>
-            <div className="space-y-4">
-              <Button asChild className="w-full">
-                <Link to="/order-history">View Order History</Link>
-              </Button>
-              <Button variant="outline" asChild className="w-full">
-                <Link to="/products">Continue Shopping</Link>
-              </Button>
-            </div>
+            <Loader2 className="h-12 w-12 animate-spin text-primary mb-4" />
+            <p className="text-center text-lg">Processing your order...</p>
           </div>
         </div>
       </Layout>
@@ -368,54 +224,33 @@ export default function Checkout() {
                 </div>
               </CardHeader>
               <CardContent>
-                <form className="space-y-4">
+                <div className="space-y-4">
                   <div className="space-y-2">
-                    <Label htmlFor="street">Street Address</Label>
+                    <Label htmlFor="address">Delivery Address</Label>
                     <Input
-                      id="street"
-                      name="street"
-                      value={deliveryAddress.street}
-                      onChange={handleAddressChange}
-                      placeholder="123 High Street"
+                      id="address"
+                      value={deliveryAddress}
+                      onChange={(e) => setDeliveryAddress(e.target.value)}
+                      placeholder="Enter your full delivery address"
                       required
                     />
                   </div>
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    <div className="space-y-2">
-                      <Label htmlFor="city">City/Town</Label>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="date">Delivery Date</Label>
+                    <div className="flex">
+                      <Calendar className="mr-2 h-4 w-4 opacity-70 mt-3" />
                       <Input
-                        id="city"
-                        name="city"
-                        value={deliveryAddress.city}
-                        onChange={handleAddressChange}
-                        placeholder="Blackburn"
-                        required
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="county">County</Label>
-                      <Input
-                        id="county"
-                        name="county"
-                        value={deliveryAddress.county}
-                        onChange={handleAddressChange}
-                        placeholder="Lancashire"
-                        required
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="postcode">Postcode</Label>
-                      <Input
-                        id="postcode"
-                        name="postcode"
-                        value={deliveryAddress.postcode}
-                        onChange={handleAddressChange}
-                        placeholder="BB1 2CD"
+                        id="date"
+                        type="date"
+                        value={deliveryDate}
+                        onChange={(e) => setDeliveryDate(e.target.value)}
+                        min={new Date().toISOString().split("T")[0]}
                         required
                       />
                     </div>
                   </div>
-                </form>
+                </div>
               </CardContent>
             </Card>
 
@@ -425,58 +260,29 @@ export default function Checkout() {
                   <CreditCard className="h-5 w-5 mr-2 text-primary" />
                   <CardTitle>Payment Method</CardTitle>
                 </div>
+                <CardDescription>
+                  Your payment will be securely processed by Stripe
+                </CardDescription>
               </CardHeader>
               <CardContent>
-                <RadioGroup
-                  value={paymentMethod}
-                  onValueChange={setPaymentMethod}
-                  className="space-y-4"
-                >
-                  <div className="flex items-center space-x-2 border rounded-md p-4">
-                    <RadioGroupItem value="card" id="card" />
-                    <Label htmlFor="card" className="flex-1">
-                      Credit/Debit Card
-                    </Label>
-                    <div className="flex space-x-1">
-                      <div className="w-10 h-6 bg-gray-200 rounded"></div>
-                      <div className="w-10 h-6 bg-gray-200 rounded"></div>
-                      <div className="w-10 h-6 bg-gray-200 rounded"></div>
-                    </div>
-                  </div>
-                  <div className="flex items-center space-x-2 border rounded-md p-4">
-                    <RadioGroupItem value="paypal" id="paypal" />
-                    <Label htmlFor="paypal" className="flex-1">
-                      PayPal
-                    </Label>
-                    <div className="w-10 h-6 bg-gray-200 rounded"></div>
-                  </div>
-                  <div className="flex items-center space-x-2 border rounded-md p-4">
-                    <RadioGroupItem value="cash" id="cash" />
-                    <Label htmlFor="cash">Cash on Delivery</Label>
-                  </div>
-                </RadioGroup>
-
-                {paymentMethod === "card" && (
-                  <div className="mt-6 space-y-4">
-                    <div className="space-y-2">
-                      <Label htmlFor="cardNumber">Card Number</Label>
-                      <Input
-                        id="cardNumber"
-                        placeholder="1234 5678 9012 3456"
-                      />
-                    </div>
-                    <div className="grid grid-cols-2 gap-4">
-                      <div className="space-y-2">
-                        <Label htmlFor="expiry">Expiry Date</Label>
-                        <Input id="expiry" placeholder="MM/YY" />
-                      </div>
-                      <div className="space-y-2">
-                        <Label htmlFor="cvc">CVC</Label>
-                        <Input id="cvc" placeholder="123" />
-                      </div>
-                    </div>
-                  </div>
-                )}
+                <div className="flex items-center justify-center p-4 border rounded-md bg-muted/50 mb-4">
+                  <CreditCard className="h-6 w-6 mr-2 text-primary" />
+                  <span>
+                    You'll be redirected to Stripe to complete your payment
+                  </span>
+                </div>
+                <div className="text-sm text-muted-foreground">
+                  <p>For testing, you can use these card numbers:</p>
+                  <ul className="list-disc pl-5 mt-2 space-y-1">
+                    <li>Success: 4242 4242 4242 4242</li>
+                    <li>Requires Authentication: 4000 0025 0000 3155</li>
+                    <li>Decline: 4000 0000 0000 0002</li>
+                  </ul>
+                  <p className="mt-2">
+                    Use any future expiry date, any 3-digit CVC, and any postal
+                    code.
+                  </p>
+                </div>
               </CardContent>
             </Card>
           </div>
@@ -523,11 +329,18 @@ export default function Checkout() {
               </CardContent>
               <CardFooter>
                 <Button
-                  onClick={handleSubmit}
+                  onClick={handleCheckout}
                   className="w-full"
-                  disabled={isProcessing}
+                  disabled={isLoading || cartItems.length === 0}
                 >
-                  {isProcessing ? "Processing..." : "Place Order"}
+                  {isLoading ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      Processing...
+                    </>
+                  ) : (
+                    "Proceed to Payment"
+                  )}
                 </Button>
               </CardFooter>
             </Card>

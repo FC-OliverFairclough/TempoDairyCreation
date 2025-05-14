@@ -42,9 +42,9 @@ export default function ProfileEdit() {
         email: user.email || "",
         phone: user.phone || "",
         address: user.address || "",
-        city: "", // These fields might not be in the user object
-        county: "", // We'll need to fetch them separately if needed
-        postcode: "",
+        city: user.city || "", // These fields might not be in the user object
+        county: user.county || "", // We'll need to fetch them separately if needed
+        postcode: user.postcode || "",
       });
 
       // Fetch additional address details if needed
@@ -135,6 +135,9 @@ export default function ProfileEdit() {
         lastName: formData.lastName,
         address: formData.address,
         phone: formData.phone,
+        city: formData.city,
+        county: formData.county,
+        postcode: formData.postcode,
       });
 
       toast({

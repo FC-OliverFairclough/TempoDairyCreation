@@ -8,6 +8,10 @@ interface UserProfile {
   firstName: string;
   lastName: string;
   address?: string;
+  city?: string;
+  state?: string;
+  postalCode?: string;
+  country?: string;
   phone?: string;
   role: "admin" | "user";
 }
@@ -65,6 +69,10 @@ export function useUserProfile() {
             email: updatedUser.email || user.email,
             phone: updatedUser.phone || user.phone,
             address: updatedUser.address || user.address,
+            city: updatedUser.city || user.city,
+            state: updatedUser.state || user.state,
+            postal_code: updatedUser.postalCode || user.postalCode,
+            country: updatedUser.country || user.country,
             updated_at: new Date(),
           })
           .eq("id", user.id);

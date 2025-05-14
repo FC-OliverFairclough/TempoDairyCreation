@@ -46,7 +46,7 @@ const CustomerStatistics = () => {
         // Get customers with orders
         const { data: customersWithOrders } = await supabase
           .from("orders")
-          .select("customer_id, recurring_delivery")
+          .select("user_id, recurring_delivery")
           .gte("created_at", firstDayOfMonth);
 
         // Count unique customers with orders this month

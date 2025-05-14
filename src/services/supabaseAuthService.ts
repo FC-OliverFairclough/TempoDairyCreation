@@ -7,6 +7,9 @@ interface User {
   lastName: string;
   address: string;
   phone: string;
+  city?: string;
+  county?: string;
+  postcode?: string;
   createdAt: Date;
   role: "admin" | "user";
 }
@@ -67,6 +70,9 @@ export const login = async (credentials: LoginCredentials): Promise<User> => {
     lastName: userData.last_name,
     address: userData.address || "",
     phone: userData.phone || "",
+    city: userData.city || "",
+    county: userData.county || "",
+    postcode: userData.postcode || "",
     createdAt: new Date(userData.created_at),
     role: userData.role as "admin" | "user",
   };
@@ -218,6 +224,9 @@ export const getCurrentUser = async (): Promise<User | null> => {
     lastName: userData.last_name,
     address: userData.address || "",
     phone: userData.phone || "",
+    city: userData.city || "",
+    county: userData.county || "",
+    postcode: userData.postcode || "",
     createdAt: new Date(userData.created_at),
     role: userData.role as "admin" | "user",
   };
