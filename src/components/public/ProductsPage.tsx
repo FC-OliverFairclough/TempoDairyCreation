@@ -5,6 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { ShoppingCart, Plus, Minus } from "lucide-react";
 import Layout from "./Layout";
 import { useToast } from "@/components/ui/use-toast";
+import { useNavigate } from "react-router-dom";
 
 interface Product {
   id: string;
@@ -24,6 +25,7 @@ export default function ProductsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const { toast } = useToast();
+  const navigate = useNavigate();
 
   // Load cart from localStorage on component mount
   useEffect(() => {
@@ -254,10 +256,7 @@ export default function ProductsPage() {
                 {totalItems} item{totalItems !== 1 ? "s" : ""} in cart
               </span>
             </div>
-            <Button
-              size="sm"
-              onClick={() => (window.location.href = "/checkout")}
-            >
+            <Button size="sm" onClick={() => navigate("/checkout")}>
               Checkout
             </Button>
           </div>

@@ -81,6 +81,7 @@ export default function Checkout() {
             });
           }
 
+          console.log("Cart items array:", cartItemsArray);
           if (cartItemsArray.length > 0) {
             setCartItems(cartItemsArray);
           } else {

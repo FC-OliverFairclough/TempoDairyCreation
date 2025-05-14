@@ -32,8 +32,8 @@ export default function CartPage() {
     const loadCart = () => {
       try {
         setLoading(true);
-        const savedCart = localStorage.getItem("milkman_cart");
-        const savedProducts = localStorage.getItem("milkman_products");
+        const savedCart = localStorage.getItem("cart");
+        const savedProducts = localStorage.getItem("products");
 
         if (!savedCart || !savedProducts) {
           setCartItems([]);
@@ -86,11 +86,11 @@ export default function CartPage() {
     );
 
     // Update localStorage
-    const savedCart = localStorage.getItem("milkman_cart");
+    const savedCart = localStorage.getItem("cart");
     if (savedCart) {
       const cartData = JSON.parse(savedCart);
       cartData[productId] = newQuantity;
-      localStorage.setItem("milkman_cart", JSON.stringify(cartData));
+      localStorage.setItem("cart", JSON.stringify(cartData));
     }
   };
 
@@ -101,11 +101,11 @@ export default function CartPage() {
     );
 
     // Update localStorage
-    const savedCart = localStorage.getItem("milkman_cart");
+    const savedCart = localStorage.getItem("cart");
     if (savedCart) {
       const cartData = JSON.parse(savedCart);
       delete cartData[productId];
-      localStorage.setItem("milkman_cart", JSON.stringify(cartData));
+      localStorage.setItem("cart", JSON.stringify(cartData));
     }
 
     toast({
@@ -117,7 +117,7 @@ export default function CartPage() {
 
   const clearCart = () => {
     setCartItems([]);
-    localStorage.removeItem("milkman_cart");
+    localStorage.removeItem("cart");
     toast({
       title: "Cart cleared",
       description: "All items have been removed from your cart",

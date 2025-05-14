@@ -27,6 +27,7 @@ function App() {
   return (
     <Suspense fallback={<p>Loading...</p>}>
       <>
+        {import.meta.env.VITE_TEMPO === "true" && useRoutes(routes)}
         <Routes>
           <Route path="/" element={<HomePage />} />
           <Route path="/products" element={<ProductsPage />} />
@@ -75,14 +76,7 @@ function App() {
               </ProtectedRoute>
             }
           />
-          <Route
-            path="/checkout"
-            element={
-              <ProtectedRoute>
-                <Checkout />
-              </ProtectedRoute>
-            }
-          />
+          <Route path="/checkout" element={<Checkout />} />
           <Route
             path="/order-confirmation"
             element={
@@ -95,7 +89,6 @@ function App() {
             <Route path="/tempobook/*" />
           )}
         </Routes>
-        {import.meta.env.VITE_TEMPO === "true" && useRoutes(routes)}
       </>
     </Suspense>
   );
