@@ -47,14 +47,7 @@ export async function createCheckoutSession({
       },
     );
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`Error ${response.status}: ${errorText}`);
-    }
-
-    const data = await response.json();
-    if (data.error) throw new Error(data.error.message);
-    return data;
+    // This code is no longer needed as we're using the supabase client
   } catch (error) {
     console.error("Error creating checkout session:", error);
     throw error;
