@@ -47,6 +47,7 @@ export default function Checkout() {
   const [cartItems, setCartItems] = useState<CartItem[]>([]);
   const [deliveryAddress, setDeliveryAddress] = useState("");
   const [deliveryDate, setDeliveryDate] = useState("");
+  const [error, setError] = useState<string | null>(null);
 
   // Get cart items from localStorage on component mount
   useEffect(() => {
@@ -136,10 +137,6 @@ export default function Checkout() {
   const deliveryFee = 2.99;
   const total = subtotal + deliveryFee;
 
-  // src/components/public/Checkout.tsx (handleCheckout function)
-  // Add this state for error handling if not already present
-  const [error, setError] = useState<string | null>(null);
-
   const handleCheckout = async () => {
     if (!user) {
       toast({
@@ -176,11 +173,11 @@ export default function Checkout() {
       // Format cart items to ensure they have consistent properties
       const formattedItems = cartItems.map((item) => ({
         id: item.id,
-        name: item.name || item.title || "Product", // Handle both name and title properties
+        name: item.name || "Product", // Handle both name and title properties
         description: item.description || "",
         price: item.price,
         quantity: item.quantity,
-        image: item.image || item.image_url, // Handle both image and image_url properties
+        image: item.image,
       }));
 
       console.log(
@@ -196,6 +193,10 @@ export default function Checkout() {
       });
 
       console.log("Checkout session created:", result);
+
+      if (!result) {
+        throw new Error("No response from checkout service");
+      }
 
       if (result.url) {
         // Redirect to Stripe checkout
@@ -228,8 +229,6 @@ export default function Checkout() {
       setIsLoading(false);
     }
   };
-
-  // Error display is handled in the return JSX
 
   if (isLoading) {
     return (

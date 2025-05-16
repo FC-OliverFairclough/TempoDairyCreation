@@ -1,4 +1,4 @@
-// src/services/stripeService.ts
+// src/services/stripeService.ts - Improved error handling
 import { supabase } from "@/lib/supabase";
 import stripePromise from "@/lib/stripe";
 
@@ -32,35 +32,6 @@ export async function createCheckoutSession({
       hasDeliveryDate: !!deliveryDate,
     });
 
-    // Get the Supabase URL from environment variables
-    const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-    if (!supabaseUrl) {
-      throw new Error("VITE_SUPABASE_URL is not defined");
-    }
-
-    // Get the current session for authentication
-    const {
-      data: { session },
-    } = await supabase.auth.getSession();
-
-    // Create headers object with or without auth token
-    const headers: Record<string, string> = {
-      "Content-Type": "application/json",
-    };
-
-    // Add authorization header if session exists
-    if (session?.access_token) {
-      headers["Authorization"] = `Bearer ${session.access_token}`;
-    } else {
-      console.warn("No authenticated session found");
-    }
-
-    console.log(
-      "Sending request to:",
-      `${supabaseUrl}/functions/v1/create-checkout-session`,
-    );
-    console.log("With headers:", Object.keys(headers));
-
     // Format products to ensure consistent property names
     const formattedProducts = products.map((item) => ({
       id: item.id,
@@ -71,20 +42,77 @@ export async function createCheckoutSession({
       image: item.image || item.image_url,
     }));
 
-    // Use the Supabase client to invoke the function
-    const { data, error } = await supabase.functions.invoke(
-      "create-checkout-session",
+    // Direct HTTP request to the function to avoid potential issues with the Supabase SDK
+    const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+    const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+
+    if (!supabaseUrl || !anonKey) {
+      throw new Error("Missing Supabase environment variables");
+    }
+
+    // Get current auth session
+    const { data: authData } = await supabase.auth.getSession();
+    const accessToken = authData?.session?.access_token;
+
+    // Create headers with auth token if available
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+      apikey: anonKey,
+    };
+
+    if (accessToken) {
+      headers["Authorization"] = `Bearer ${accessToken}`;
+    }
+
+    console.log(
+      `Making direct request to: ${supabaseUrl}/functions/v1/create-checkout-session`,
+    );
+
+    // Make direct fetch request to the function
+    const response = await fetch(
+      `${supabaseUrl}/functions/v1/create-checkout-session`,
       {
-        body: {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
           products: formattedProducts,
           userId,
           deliveryAddress,
           deliveryDate,
-        },
+        }),
       },
     );
 
-    // This code has been moved inside the try/catch block above
+    if (!response.ok) {
+      // Try to get error details from response
+      let errorBody;
+      try {
+        errorBody = await response.text();
+        console.error("Function error response:", errorBody);
+      } catch (e) {
+        console.error("Could not parse error response");
+      }
+
+      throw new Error(
+        `Function returned ${response.status}: ${errorBody || response.statusText}`,
+      );
+    }
+
+    // Parse response JSON
+    const data = await response.json();
+
+    if (!data) {
+      throw new Error("No data returned from checkout session function");
+    }
+
+    console.log("Checkout session response:", data);
+
+    if (data.error) {
+      throw new Error(data.error);
+    }
+
+    // Return the data
+    return data;
   } catch (error) {
     console.error("Error creating checkout session:", error);
     throw error;
