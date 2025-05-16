@@ -136,6 +136,10 @@ export default function Checkout() {
   const deliveryFee = 2.99;
   const total = subtotal + deliveryFee;
 
+  // src/components/public/Checkout.tsx (handleCheckout function)
+  // Add this state for error handling if not already present
+  const [error, setError] = useState<string | null>(null);
+
   const handleCheckout = async () => {
     if (!user) {
       toast({
@@ -167,32 +171,65 @@ export default function Checkout() {
 
     try {
       setIsLoading(true);
+      setError(null);
 
-      const { sessionId, url } = await createCheckoutSession({
-        products: cartItems,
+      // Format cart items to ensure they have consistent properties
+      const formattedItems = cartItems.map((item) => ({
+        id: item.id,
+        name: item.name || item.title || "Product", // Handle both name and title properties
+        description: item.description || "",
+        price: item.price,
+        quantity: item.quantity,
+        image: item.image || item.image_url, // Handle both image and image_url properties
+      }));
+
+      console.log(
+        "Sending checkout request with items:",
+        formattedItems.length,
+      );
+
+      const result = await createCheckoutSession({
+        products: formattedItems,
         userId: user.id,
         deliveryAddress,
         deliveryDate,
       });
 
-      // Redirect to Stripe checkout
-      if (url) {
-        window.location.href = url;
+      console.log("Checkout session created:", result);
+
+      if (result.url) {
+        // Redirect to Stripe checkout
+        window.location.href = result.url;
+      } else if (result.sessionId) {
+        // If we only got a sessionId but no URL, use redirectToCheckout
+        await redirectToCheckout(result.sessionId);
       } else {
-        await redirectToCheckout(sessionId);
+        throw new Error("No checkout URL or session ID returned");
       }
     } catch (error) {
       console.error("Checkout error:", error);
+
+      // Set error message for display
+      setError(
+        error instanceof Error
+          ? error.message
+          : "There was a problem processing your checkout. Please try again.",
+      );
+
       toast({
         variant: "destructive",
         title: "Checkout failed",
         description:
-          "There was a problem processing your order. Please try again.",
+          error instanceof Error
+            ? error.message
+            : "There was a problem processing your order. Please try again.",
       });
     } finally {
       setIsLoading(false);
     }
   };
+
+  // Error display is handled in the return JSX
 
   if (isLoading) {
     return (
@@ -214,6 +251,13 @@ export default function Checkout() {
           <ShoppingCart className="h-6 w-6 mr-2 text-primary" />
           <h1 className="text-3xl font-bold">Checkout</h1>
         </div>
+
+        {error && (
+          <div className="bg-destructive/15 border border-destructive text-destructive px-4 py-3 rounded-md mb-6 flex items-center">
+            <AlertCircle className="h-4 w-4 mr-2" />
+            <p>{error}</p>
+          </div>
+        )}
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
           <div className="lg:col-span-2">

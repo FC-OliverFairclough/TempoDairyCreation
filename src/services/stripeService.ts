@@ -1,13 +1,16 @@
+// src/services/stripeService.ts
 import { supabase } from "@/lib/supabase";
 import stripePromise from "@/lib/stripe";
 
 export interface CartItem {
   id: string;
-  name: string;
+  name?: string;
+  title?: string; // Handle both name and title properties
   description?: string;
   price: number;
   quantity: number;
   image?: string;
+  image_url?: string; // Handle both image and image_url properties
 }
 
 export async function createCheckoutSession({
@@ -23,31 +26,65 @@ export async function createCheckoutSession({
 }) {
   try {
     console.log("Creating checkout session with:", {
-      products,
+      productCount: products.length,
       userId,
-      deliveryAddress,
-      deliveryDate,
+      hasDeliveryAddress: !!deliveryAddress,
+      hasDeliveryDate: !!deliveryDate,
     });
 
-    // Direct fetch to the edge function URL instead of using the invoke method
-    const response = await fetch(
-      `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/create-checkout-session`,
+    // Get the Supabase URL from environment variables
+    const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+    if (!supabaseUrl) {
+      throw new Error("VITE_SUPABASE_URL is not defined");
+    }
+
+    // Get the current session for authentication
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+
+    // Create headers object with or without auth token
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+    };
+
+    // Add authorization header if session exists
+    if (session?.access_token) {
+      headers["Authorization"] = `Bearer ${session.access_token}`;
+    } else {
+      console.warn("No authenticated session found");
+    }
+
+    console.log(
+      "Sending request to:",
+      `${supabaseUrl}/functions/v1/create-checkout-session`,
+    );
+    console.log("With headers:", Object.keys(headers));
+
+    // Format products to ensure consistent property names
+    const formattedProducts = products.map((item) => ({
+      id: item.id,
+      name: item.name || item.title || "Unknown Product",
+      description: item.description || "",
+      price: item.price,
+      quantity: item.quantity,
+      image: item.image || item.image_url,
+    }));
+
+    // Use the Supabase client to invoke the function
+    const { data, error } = await supabase.functions.invoke(
+      "create-checkout-session",
       {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
-        },
-        body: JSON.stringify({
-          products,
+        body: {
+          products: formattedProducts,
           userId,
           deliveryAddress,
           deliveryDate,
-        }),
+        },
       },
     );
 
-    // This code is no longer needed as we're using the supabase client
+    // This code has been moved inside the try/catch block above
   } catch (error) {
     console.error("Error creating checkout session:", error);
     throw error;

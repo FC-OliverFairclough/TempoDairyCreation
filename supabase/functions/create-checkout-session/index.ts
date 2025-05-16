@@ -1,12 +1,21 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.6";
 import Stripe from "https://esm.sh/stripe@13.10.0";
-import { corsHeaders } from "@shared/cors.ts";
+
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers":
+    "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Methods": "POST, OPTIONS, GET",
+};
 
 serve(async (req) => {
-  // Handle CORS preflight requests
+  // This is needed if you're planning to invoke your function from a browser.
   if (req.method === "OPTIONS") {
-    return new Response("ok", { headers: corsHeaders, status: 200 });
+    return new Response("ok", {
+      headers: corsHeaders,
+      status: 200,
+    });
   }
 
   try {
@@ -34,8 +43,20 @@ serve(async (req) => {
     });
 
     // Initialize Supabase client
-    const supabaseUrl = Deno.env.get("SUPABASE_URL") || "";
-    const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_KEY") || "";
+    const supabaseUrl = Deno.env.get("SUPABASE_URL");
+    const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_KEY");
+
+    if (!supabaseUrl || !supabaseServiceKey) {
+      console.error("SUPABASE_URL or SUPABASE_SERVICE_KEY is not defined");
+      return new Response(
+        JSON.stringify({ error: "Database connection is not configured" }),
+        {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+          status: 500,
+        },
+      );
+    }
+
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
     // Create a new order in the database with pending status
@@ -86,12 +107,15 @@ serve(async (req) => {
       );
     }
 
+    // Get origin for success/cancel URLs
+    const origin = req.headers.get("origin") || "http://localhost:5173";
+
     // Create Stripe checkout session
     const lineItems = products.map((product) => ({
       price_data: {
         currency: "usd",
         product_data: {
-          name: product.name,
+          name: product.name || product.title || "Product",
           description: product.description || "",
           images: product.image ? [product.image] : [],
         },
@@ -104,8 +128,8 @@ serve(async (req) => {
       payment_method_types: ["card"],
       line_items: lineItems,
       mode: "payment",
-      success_url: `${req.headers.get("origin")}/order-confirmation?session_id={CHECKOUT_SESSION_ID}`,
-      cancel_url: `${req.headers.get("origin")}/cart`,
+      success_url: `${origin}/order-confirmation?session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: `${origin}/cart`,
       metadata: {
         order_id: order.id,
         user_id: userId,
