@@ -41,7 +41,19 @@ import {
 } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { useSupabaseData, updateSupabaseRecord } from "@/hooks/useSupabaseData";
+import { supabase } from "@/lib/supabase";
+
+interface OrderItem {
+  id: string;
+  product_id: string;
+  quantity: number;
+  price: number;
+  products?: {
+    id: string;
+    name: string;
+    image_url?: string;
+  };
+}
 
 interface Order {
   id: string;
@@ -49,12 +61,7 @@ interface Order {
   customerEmail: string;
   customerPhone: string;
   address: string;
-  products: {
-    id: string;
-    name: string;
-    quantity: number;
-    price: number;
-  }[];
+  orderItems: OrderItem[];
   total: number;
   deliveryDate: string;
   paymentStatus: "paid" | "pending" | "failed";
@@ -63,9 +70,12 @@ interface Order {
 }
 
 const OrderManagement = () => {
+  const [orders, setOrders] = useState<Order[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState("");
   const [filterStatus, setFilterStatus] = useState("all");
-  const [sortField, setSortField] = useState("deliveryDate");
+  const [sortField, setSortField] = useState("created_at");
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc");
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
   const [isViewDialogOpen, setIsViewDialogOpen] = useState(false);
@@ -73,39 +83,105 @@ const OrderManagement = () => {
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
 
   // Fetch orders from Supabase
-  const {
-    data: orders,
-    loading,
-    error,
-    count: totalOrders,
-  } = useSupabaseData<Order>({
-    table: "orders",
-    columns: "*, customers(*)",
-    filters: filterStatus !== "all" ? { order_status: filterStatus } : {},
-    orderBy: { column: sortField, ascending: sortDirection === "asc" },
-  });
+  const fetchOrders = async () => {
+    try {
+      setLoading(true);
+      setError(null);
 
-  // Transform orders data from Supabase format to component format
-  const transformedOrders = orders.map((order: any) => ({
-    id: order.id,
-    customerName: order.customers?.name || "Unknown",
-    customerEmail: order.customers?.email || "Unknown",
-    customerPhone: order.customers?.phone || "Unknown",
-    address: order.delivery_address || "Unknown",
-    products: order.products || [],
-    total: order.total_amount || 0,
-    deliveryDate: order.delivery_date || new Date().toISOString(),
-    paymentStatus: order.payment_status || "pending",
-    orderStatus: order.order_status || "pending",
-    createdAt: order.created_at || new Date().toISOString(),
-  }));
+      // Build the query
+      let query = supabase.from("orders").select(`
+          id,
+          created_at,
+          delivery_date,
+          delivery_status,
+          payment_status,
+          total_amount,
+          delivery_address,
+          user_id,
+          users!inner(
+            id,
+            email,
+            first_name,
+            last_name,
+            phone
+          ),
+          order_items(
+            id,
+            product_id,
+            quantity,
+            price,
+            products(
+              id,
+              name,
+              image_url
+            )
+          )
+        `);
+
+      // Apply status filter
+      if (filterStatus !== "all") {
+        if (
+          filterStatus === "paid" ||
+          filterStatus === "pending" ||
+          filterStatus === "failed"
+        ) {
+          query = query.eq("payment_status", filterStatus);
+        } else {
+          query = query.eq("delivery_status", filterStatus);
+        }
+      }
+
+      // Apply sorting
+      query = query.order(sortField, { ascending: sortDirection === "asc" });
+
+      const { data: ordersData, error: ordersError } = await query;
+
+      if (ordersError) {
+        throw new Error(ordersError.message);
+      }
+
+      // Transform the data
+      const transformedOrders: Order[] = (ordersData || []).map(
+        (order: any) => {
+          const user = order.users;
+          return {
+            id: order.id,
+            customerName: user
+              ? `${user.first_name} ${user.last_name}`
+              : "Unknown",
+            customerEmail: user?.email || "Unknown",
+            customerPhone: user?.phone || "Unknown",
+            address: order.delivery_address || "Unknown",
+            orderItems: order.order_items || [],
+            total: order.total_amount || 0,
+            deliveryDate: order.delivery_date || new Date().toISOString(),
+            paymentStatus: order.payment_status || "pending",
+            orderStatus: order.delivery_status || "pending",
+            createdAt: order.created_at || new Date().toISOString(),
+          };
+        },
+      );
+
+      setOrders(transformedOrders);
+    } catch (err) {
+      console.error("Error fetching orders:", err);
+      setError(err instanceof Error ? err.message : "Failed to fetch orders");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchOrders();
+  }, [filterStatus, sortField, sortDirection]);
 
   // Filter orders by search term (client-side filtering for search)
-  const filteredOrders = transformedOrders.filter((order) => {
+  const filteredOrders = orders.filter((order) => {
     const matchesSearch =
       !searchTerm ||
       order.customerName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      order.id.toLowerCase().includes(searchTerm.toLowerCase());
+      order.id.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      order.customerEmail.toLowerCase().includes(searchTerm.toLowerCase());
 
     return matchesSearch;
   });
@@ -132,19 +208,22 @@ const OrderManagement = () => {
   // Handle saving order changes to Supabase
   const handleSaveOrderChanges = async (
     orderId: string,
-    updatedData: Partial<Order>,
+    orderStatus: string,
+    paymentStatus: string,
   ) => {
     try {
-      // Map component data format back to Supabase format
-      const supabaseData = {
-        order_status: updatedData.orderStatus,
-        payment_status: updatedData.paymentStatus,
-        delivery_date: updatedData.deliveryDate,
-      };
+      const { error } = await supabase
+        .from("orders")
+        .update({
+          delivery_status: orderStatus,
+          payment_status: paymentStatus,
+        })
+        .eq("id", orderId);
 
-      await updateSupabaseRecord("orders", orderId, supabaseData);
+      if (error) throw error;
 
-      // Close dialog and refresh data (will happen automatically with useSupabaseData)
+      // Refresh orders
+      await fetchOrders();
       setIsEditDialogOpen(false);
     } catch (error) {
       console.error("Error updating order:", error);
@@ -173,6 +252,10 @@ const OrderManagement = () => {
     }
   };
 
+  const getTotalItems = (orderItems: OrderItem[]) => {
+    return orderItems.reduce((total, item) => total + item.quantity, 0);
+  };
+
   return (
     <div className="bg-background p-6 rounded-lg">
       <h1 className="text-2xl font-bold mb-6">Order Management</h1>
@@ -185,7 +268,7 @@ const OrderManagement = () => {
             size={18}
           />
           <Input
-            placeholder="Search by order ID or customer name"
+            placeholder="Search by order ID, customer name, or email"
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             className="pl-10"
@@ -218,9 +301,7 @@ const OrderManagement = () => {
       {/* Orders Table */}
       <Card>
         <CardHeader className="pb-0">
-          <CardTitle>
-            Orders {totalOrders !== null && `(${totalOrders})`}
-          </CardTitle>
+          <CardTitle>Orders ({filteredOrders.length})</CardTitle>
         </CardHeader>
         <CardContent>
           {/* Loading and Error States */}
@@ -266,12 +347,13 @@ const OrderManagement = () => {
                         <ChevronDown size={16} className="inline ml-1" />
                       ))}
                   </TableHead>
+                  <TableHead>Items</TableHead>
                   <TableHead
                     className="cursor-pointer"
-                    onClick={() => handleSort("total")}
+                    onClick={() => handleSort("total_amount")}
                   >
                     Total
-                    {sortField === "total" &&
+                    {sortField === "total_amount" &&
                       (sortDirection === "asc" ? (
                         <ChevronUp size={16} className="inline ml-1" />
                       ) : (
@@ -280,10 +362,10 @@ const OrderManagement = () => {
                   </TableHead>
                   <TableHead
                     className="cursor-pointer"
-                    onClick={() => handleSort("deliveryDate")}
+                    onClick={() => handleSort("delivery_date")}
                   >
                     Delivery Date
-                    {sortField === "deliveryDate" &&
+                    {sortField === "delivery_date" &&
                       (sortDirection === "asc" ? (
                         <ChevronUp size={16} className="inline ml-1" />
                       ) : (
@@ -299,12 +381,17 @@ const OrderManagement = () => {
                 {filteredOrders.length > 0 ? (
                   filteredOrders.map((order) => (
                     <TableRow key={order.id}>
-                      <TableCell className="font-medium">{order.id}</TableCell>
+                      <TableCell className="font-medium">
+                        {order.id.slice(0, 8)}...
+                      </TableCell>
                       <TableCell>
                         <div>{order.customerName}</div>
                         <div className="text-sm text-gray-500">
                           {order.customerEmail}
                         </div>
+                      </TableCell>
+                      <TableCell>
+                        {getTotalItems(order.orderItems)} items
                       </TableCell>
                       <TableCell>${order.total.toFixed(2)}</TableCell>
                       <TableCell>
@@ -356,7 +443,7 @@ const OrderManagement = () => {
                 ) : (
                   <TableRow>
                     <TableCell
-                      colSpan={7}
+                      colSpan={8}
                       className="text-center py-8 text-gray-500"
                     >
                       No orders found matching your criteria
@@ -372,9 +459,11 @@ const OrderManagement = () => {
       {/* View Order Dialog */}
       {selectedOrder && (
         <Dialog open={isViewDialogOpen} onOpenChange={setIsViewDialogOpen}>
-          <DialogContent className="max-w-3xl">
+          <DialogContent className="max-w-4xl">
             <DialogHeader>
-              <DialogTitle>Order Details - {selectedOrder.id}</DialogTitle>
+              <DialogTitle>
+                Order Details - {selectedOrder.id.slice(0, 8)}
+              </DialogTitle>
               <DialogDescription>
                 Created on {new Date(selectedOrder.createdAt).toLocaleString()}
               </DialogDescription>
@@ -429,6 +518,14 @@ const OrderManagement = () => {
                       ${selectedOrder.total.toFixed(2)}
                     </p>
                   </div>
+                  <div>
+                    <h3 className="text-sm font-medium text-gray-500">
+                      Total Items
+                    </h3>
+                    <p className="mt-1">
+                      {getTotalItems(selectedOrder.orderItems)} items
+                    </p>
+                  </div>
                 </div>
               </TabsContent>
 
@@ -468,13 +565,27 @@ const OrderManagement = () => {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {selectedOrder.products.map((product) => (
-                      <TableRow key={product.id}>
-                        <TableCell>{product.name}</TableCell>
-                        <TableCell>{product.quantity}</TableCell>
-                        <TableCell>${product.price.toFixed(2)}</TableCell>
+                    {selectedOrder.orderItems.map((item) => (
+                      <TableRow key={item.id}>
                         <TableCell>
-                          ${(product.price * product.quantity).toFixed(2)}
+                          <div className="flex items-center gap-3">
+                            {item.products?.image_url && (
+                              <img
+                                src={item.products.image_url}
+                                alt={item.products.name}
+                                className="w-10 h-10 rounded object-cover"
+                              />
+                            )}
+                            <span>
+                              {item.products?.name ||
+                                `Product ${item.product_id.slice(0, 8)}`}
+                            </span>
+                          </div>
+                        </TableCell>
+                        <TableCell>{item.quantity}</TableCell>
+                        <TableCell>${item.price.toFixed(2)}</TableCell>
+                        <TableCell>
+                          ${(item.price * item.quantity).toFixed(2)}
                         </TableCell>
                       </TableRow>
                     ))}
@@ -516,13 +627,23 @@ const OrderManagement = () => {
         <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
           <DialogContent>
             <DialogHeader>
-              <DialogTitle>Edit Order - {selectedOrder.id}</DialogTitle>
+              <DialogTitle>
+                Edit Order - {selectedOrder.id.slice(0, 8)}
+              </DialogTitle>
             </DialogHeader>
 
             <div className="space-y-4">
               <div>
                 <h3 className="text-sm font-medium mb-2">Order Status</h3>
-                <Select defaultValue={selectedOrder.orderStatus}>
+                <Select
+                  defaultValue={selectedOrder.orderStatus}
+                  onValueChange={(value) => {
+                    setSelectedOrder({
+                      ...selectedOrder,
+                      orderStatus: value as any,
+                    });
+                  }}
+                >
                   <SelectTrigger>
                     <SelectValue placeholder="Select status" />
                   </SelectTrigger>
@@ -537,7 +658,15 @@ const OrderManagement = () => {
 
               <div>
                 <h3 className="text-sm font-medium mb-2">Payment Status</h3>
-                <Select defaultValue={selectedOrder.paymentStatus}>
+                <Select
+                  defaultValue={selectedOrder.paymentStatus}
+                  onValueChange={(value) => {
+                    setSelectedOrder({
+                      ...selectedOrder,
+                      paymentStatus: value as any,
+                    });
+                  }}
+                >
                   <SelectTrigger>
                     <SelectValue placeholder="Select payment status" />
                   </SelectTrigger>
@@ -551,7 +680,16 @@ const OrderManagement = () => {
 
               <div>
                 <h3 className="text-sm font-medium mb-2">Delivery Date</h3>
-                <Input type="date" defaultValue={selectedOrder.deliveryDate} />
+                <Input
+                  type="date"
+                  defaultValue={selectedOrder.deliveryDate.split("T")[0]}
+                  onChange={(e) => {
+                    setSelectedOrder({
+                      ...selectedOrder,
+                      deliveryDate: e.target.value,
+                    });
+                  }}
+                />
               </div>
             </div>
 
@@ -563,10 +701,15 @@ const OrderManagement = () => {
                 Cancel
               </Button>
               <Button
-                onClick={() =>
-                  selectedOrder &&
-                  handleSaveOrderChanges(selectedOrder.id, selectedOrder)
-                }
+                onClick={() => {
+                  if (selectedOrder) {
+                    handleSaveOrderChanges(
+                      selectedOrder.id,
+                      selectedOrder.orderStatus,
+                      selectedOrder.paymentStatus,
+                    );
+                  }
+                }}
               >
                 Save Changes
               </Button>
@@ -582,8 +725,8 @@ const OrderManagement = () => {
             <DialogHeader>
               <DialogTitle>Confirm Deletion</DialogTitle>
               <DialogDescription>
-                Are you sure you want to delete order {selectedOrder.id}? This
-                action cannot be undone.
+                Are you sure you want to delete order{" "}
+                {selectedOrder.id.slice(0, 8)}? This action cannot be undone.
               </DialogDescription>
             </DialogHeader>
 

@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { getCurrentUser } from "@/services/supabaseAuthService";
+import { Link, useNavigate } from "react-router-dom";
 import Layout from "./Layout";
 import {
   Table,
@@ -13,83 +13,127 @@ import {
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Package, Eye, Loader2 } from "lucide-react";
-import { Link, useNavigate } from "react-router-dom";
 import { supabase } from "@/lib/supabase";
+import { getCurrentUser } from "@/services/supabaseAuthService";
 
 interface OrderItem {
-  id: number;
-  name: string;
+  id: string;
+  product_id: string;
   quantity: number;
   price: number;
+  subtotal?: number;
+  products?: {
+    id?: string;
+    name?: string;
+    title?: string;
+  };
 }
 
 interface Order {
   id: string;
   date: Date;
-  status: "processing" | "shipped" | "delivered" | "cancelled";
+  status: string;
   total: number;
   items: OrderItem[];
 }
 
 export default function OrderHistory() {
   const [orders, setOrders] = useState<Order[]>([]);
-  const [user, setUser] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const navigate = useNavigate();
+  const [user, setUser] = useState(null);
 
   useEffect(() => {
     async function fetchOrders() {
       try {
-        // Get current user
+        // Check authentication first
         const currentUser = await getCurrentUser();
         if (!currentUser) {
-          // Redirect to login if not authenticated
           navigate("/login");
           return;
         }
         setUser(currentUser);
 
-        // Fetch orders for this user from Supabase
-        const { data: ordersData, error: ordersError } = await supabase
-          .from("orders")
-          .select(
-            `
-            id, 
-            created_at, 
-            delivery_status, 
-            total_amount,
-            order_items (id, product_id, quantity, price, products(title))
-          `,
-          )
-          .eq("user_id", currentUser.id)
-          .order("created_at", { ascending: false });
+        try {
+          setLoading(true);
+          setError(null);
 
-        if (ordersError) {
-          throw ordersError;
-        }
+          // First, fetch the orders for this user
+          const { data: ordersData, error: ordersError } = await supabase
+            .from("orders")
+            .select("*")
+            .eq("user_id", currentUser.id)
+            .order("created_at", { ascending: false });
 
-        if (ordersData) {
-          // Transform the data to match our Order interface
-          const transformedOrders: Order[] = ordersData.map((order: any) => ({
-            id: order.id,
-            date: new Date(order.created_at),
-            status: order.delivery_status,
-            total: order.total_amount,
-            items: order.order_items.map((item: any) => ({
-              id: item.id,
-              name: item.products?.title || "Unknown Product",
-              quantity: item.quantity,
-              price: item.price,
-            })),
-          }));
+          if (ordersError) {
+            throw ordersError;
+          }
 
-          setOrders(transformedOrders);
+          // For each order, fetch its order items
+          const ordersWithItems = await Promise.all(
+            ordersData.map(async (order) => {
+              // Fetch order items for this order
+              const { data: itemsData, error: itemsError } = await supabase
+                .from("order_items")
+                .select(
+                  `
+                  id,
+                  product_id,
+                  quantity,
+                  price,
+                  subtotal,
+                  products:product_id (id, name)
+                `,
+                )
+                .eq("order_id", order.id);
+
+              if (itemsError) {
+                console.error(
+                  `Error fetching items for order ${order.id}:`,
+                  itemsError,
+                );
+                return {
+                  id: order.id,
+                  date: new Date(order.created_at),
+                  status: order.delivery_status || "processing",
+                  total: order.total_amount,
+                  items: [],
+                };
+              }
+
+              return {
+                id: order.id,
+                date: new Date(order.created_at),
+                status: order.delivery_status || "processing",
+                total: order.total_amount,
+                items: itemsData || [],
+              };
+            }),
+          );
+
+          setOrders(ordersWithItems);
+        } catch (err) {
+          console.error("Error fetching orders:", err);
+          if (err.message?.includes("JWT") || err.message?.includes("auth")) {
+            navigate("/login");
+          } else {
+            setError(
+              "Failed to load your order history. Please try again later.",
+            );
+          }
+        } finally {
+          setLoading(false);
         }
       } catch (err) {
-        console.error("Error fetching orders:", err);
-        setError("Failed to load your order history. Please try again later.");
-      } finally {
+        console.error("Error in fetchOrders:", err);
+        if (err.message?.includes("JWT") || err.message?.includes("auth")) {
+          navigate("/login");
+        } else {
+          setError(
+            "Failed to load your order history. Please try again later.",
+          );
+        }
         setLoading(false);
       }
     }
@@ -98,17 +142,15 @@ export default function OrderHistory() {
   }, [navigate]);
 
   const getStatusBadge = (status: string) => {
-    switch (status) {
+    switch (status.toLowerCase()) {
       case "processing":
         return <Badge variant="outline">Processing</Badge>;
       case "shipped":
-        return <Badge variant="secondary">Shipped</Badge>;
+      case "confirmed":
+        return <Badge variant="secondary">Confirmed</Badge>;
+      case "completed":
       case "delivered":
-        return (
-          <Badge variant="success" className="bg-green-500 text-white">
-            Delivered
-          </Badge>
-        );
+        return <Badge className="bg-green-500 text-white">Completed</Badge>;
       case "cancelled":
         return <Badge variant="destructive">Cancelled</Badge>;
       default:
@@ -175,6 +217,7 @@ export default function OrderHistory() {
                 <TableHead>Order ID</TableHead>
                 <TableHead>Date</TableHead>
                 <TableHead>Status</TableHead>
+                <TableHead>Items</TableHead>
                 <TableHead className="text-right">Total</TableHead>
                 <TableHead className="text-right">Actions</TableHead>
               </TableRow>
@@ -182,7 +225,9 @@ export default function OrderHistory() {
             <TableBody>
               {orders.map((order) => (
                 <TableRow key={order.id}>
-                  <TableCell className="font-medium">{order.id}</TableCell>
+                  <TableCell className="font-medium">
+                    {order.id.slice(0, 8)}
+                  </TableCell>
                   <TableCell>
                     {order.date.toLocaleDateString("en-US", {
                       year: "numeric",
@@ -191,6 +236,9 @@ export default function OrderHistory() {
                     })}
                   </TableCell>
                   <TableCell>{getStatusBadge(order.status)}</TableCell>
+                  <TableCell>
+                    {order.items ? order.items.length : 0} items
+                  </TableCell>
                   <TableCell className="text-right">
                     ${order.total.toFixed(2)}
                   </TableCell>

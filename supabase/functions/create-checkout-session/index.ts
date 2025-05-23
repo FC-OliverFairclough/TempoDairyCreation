@@ -1,5 +1,6 @@
 // supabase/functions/create-checkout-session/index.ts
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.6";
 import Stripe from "https://esm.sh/stripe@13.10.0";
 
 const corsHeaders = {
@@ -10,7 +11,7 @@ const corsHeaders = {
 };
 
 serve(async (req) => {
-  // This is needed if you're planning to invoke your function from a browser.
+  // Handle CORS preflight requests
   if (req.method === "OPTIONS") {
     return new Response("ok", {
       headers: corsHeaders,
@@ -19,7 +20,7 @@ serve(async (req) => {
   }
 
   try {
-    const { products, userId, deliveryAddress, deliveryDate } =
+    const { products, userId, deliveryAddress, deliveryDate, orderId } =
       await req.json();
 
     // Validate request data
@@ -71,6 +72,9 @@ serve(async (req) => {
           name: product.name || product.title || "Product",
           description: product.description || "",
           images: product.image ? [product.image] : [],
+          metadata: {
+            product_id: product.id, // Store the product ID in metadata
+          },
         },
         unit_amount: Math.round(Number(product.price) * 100), // Convert to cents
       },
@@ -87,6 +91,9 @@ serve(async (req) => {
         user_id: userId,
         delivery_address: deliveryAddress,
         delivery_date: deliveryDate,
+        // Store products data as JSON string for webhook processing
+        products_data: JSON.stringify(products),
+        order_id: orderId || "",
       },
     });
 
@@ -98,26 +105,76 @@ serve(async (req) => {
       if (supabaseUrl && supabaseKey) {
         const supabase = createClient(supabaseUrl, supabaseKey);
 
-        // Insert order into database
-        const { data: order, error } = await supabase
-          .from("orders")
-          .insert({
-            user_id: userId,
-            delivery_address: deliveryAddress,
-            delivery_date: deliveryDate,
-            total_amount: totalAmount,
-            order_status: "pending",
-            payment_status: "unpaid",
-            stripe_session_id: session.id,
-          })
-          .select()
-          .single();
+        if (orderId) {
+          // If orderId is provided, update the existing order with stripe session id
+          const { data: updatedOrder, error: updateError } = await supabase
+            .from("orders")
+            .update({
+              stripe_session_id: session.id,
+              updated_at: new Date().toISOString(),
+            })
+            .eq("id", orderId)
+            .select()
+            .single();
 
-        if (error) {
-          // Log error but continue
-          console.error("Failed to insert order into database:", error);
+          if (updateError) {
+            console.error(
+              "Failed to update order with session ID:",
+              updateError,
+            );
+          } else {
+            console.log("Order updated with session ID:", updatedOrder.id);
+          }
         } else {
-          console.log("Order created successfully:", order.id);
+          // If no orderId, create a new order (fallback)
+          const { data: order, error } = await supabase
+            .from("orders")
+            .insert({
+              user_id: userId,
+              delivery_address: deliveryAddress,
+              delivery_date: deliveryDate,
+              total_amount: totalAmount,
+              delivery_status: "processing",
+              payment_status: "pending",
+              stripe_session_id: session.id,
+              created_at: new Date().toISOString(),
+              updated_at: new Date().toISOString(),
+            })
+            .select()
+            .single();
+
+          if (error) {
+            console.error("Failed to insert order into database:", error);
+          } else {
+            console.log("Order created successfully:", order.id);
+
+            // Insert order items with all required fields
+            const orderItems = products.map((product) => ({
+              order_id: order.id,
+              product_id: product.id,
+              quantity: Number(product.quantity) || 1,
+              price: Number(product.price) || 0,
+              subtotal:
+                (Number(product.price) || 0) * (Number(product.quantity) || 1),
+              created_at: new Date().toISOString(),
+            }));
+
+            console.log("Inserting order items:", orderItems);
+
+            const { data: insertedItems, error: itemsError } = await supabase
+              .from("order_items")
+              .insert(orderItems)
+              .select();
+
+            if (itemsError) {
+              console.error("Error creating order items:", itemsError);
+            } else {
+              console.log(
+                `Successfully inserted ${insertedItems?.length || 0} order items:`,
+                insertedItems,
+              );
+            }
+          }
         }
       } else {
         console.warn(

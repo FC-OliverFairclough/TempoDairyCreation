@@ -79,7 +79,7 @@ serve(async (req) => {
 
     // Initialize Supabase client
     const supabaseUrl = Deno.env.get("SUPABASE_URL");
-    const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+    const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_KEY");
 
     if (!supabaseUrl || !supabaseServiceKey) {
       console.error("Supabase environment variables not defined");
@@ -99,57 +99,187 @@ serve(async (req) => {
       const userId = session.metadata.user_id;
       const deliveryAddress = session.metadata.delivery_address;
       const deliveryDate = session.metadata.delivery_date;
+      const productsData = session.metadata.products_data;
+      const orderId = session.metadata.order_id;
 
-      console.log("Creating order from completed checkout session");
+      console.log("Processing completed checkout session");
+      console.log("User ID:", userId);
+      console.log("Products data:", productsData);
 
       try {
-        // Create a new order record
-        const { data: order, error: orderError } = await supabase
-          .from("orders")
-          .insert({
-            user_id: userId,
-            delivery_address: deliveryAddress,
-            delivery_date: deliveryDate,
-            order_status: "confirmed",
-            payment_status: "paid",
-            total_amount: session.amount_total / 100, // Convert from cents
-            payment_method: "card",
-            stripe_session_id: session.id,
-            payment_intent_id: session.payment_intent,
-          })
-          .select()
-          .single();
+        // First check if we have an order ID in the metadata
+        let existingOrder = null;
+        let findError = null;
 
-        if (orderError) {
-          console.error("Error creating order:", orderError);
-          throw orderError;
+        if (orderId) {
+          // Try to find the order by ID from metadata
+          const orderResult = await supabase
+            .from("orders")
+            .select("*")
+            .eq("id", orderId)
+            .single();
+
+          existingOrder = orderResult.data;
+          findError = orderResult.error;
         }
 
-        console.log("Order created:", order.id);
+        // If no order found by ID, try to find by session ID
+        if (!existingOrder) {
+          const sessionResult = await supabase
+            .from("orders")
+            .select("*")
+            .eq("stripe_session_id", session.id)
+            .single();
 
-        // If line items are available, create order items
-        if (session.line_items?.data) {
-          const orderItems = session.line_items.data.map((item) => ({
-            order_id: order.id,
-            product_id: item.price?.product || "unknown", // This might need adjustment
-            quantity: item.quantity,
-            price: item.amount_total / 100 / item.quantity,
-          }));
+          existingOrder = sessionResult.data;
+          findError = sessionResult.error;
+        }
 
-          const { error: itemsError } = await supabase
-            .from("order_items")
-            .insert(orderItems);
+        if (findError || !existingOrder) {
+          console.log("No existing order found, creating new one");
 
-          if (itemsError) {
-            console.error("Error creating order items:", itemsError);
-            // Note: We don't throw here to avoid failing the webhook
-          } else {
-            console.log("Order items created");
+          // Create a new order record if none exists
+          const { data: order, error: orderError } = await supabase
+            .from("orders")
+            .insert({
+              user_id: userId,
+              delivery_address: deliveryAddress,
+              delivery_date: deliveryDate,
+              delivery_status: "completed",
+              payment_status: "paid",
+              total_amount: session.amount_total / 100, // Convert from cents
+              payment_method: "card",
+              stripe_session_id: session.id,
+              payment_intent_id: session.payment_intent,
+              created_at: new Date().toISOString(),
+              updated_at: new Date().toISOString(),
+            })
+            .select()
+            .single();
+
+          if (orderError) {
+            console.error("Error creating order:", orderError);
+            throw orderError;
+          }
+
+          console.log("Order created:", order.id);
+
+          // Create order items if products data is available
+          if (productsData) {
+            try {
+              const products = JSON.parse(productsData);
+              console.log("Parsed products:", products);
+
+              const orderItems = products.map((product) => ({
+                order_id: order.id,
+                product_id: product.id,
+                quantity: Number(product.quantity) || 1,
+                price: Number(product.price) || 0,
+                subtotal:
+                  (Number(product.price) || 0) *
+                  (Number(product.quantity) || 1),
+                created_at: new Date().toISOString(),
+              }));
+
+              const { data: insertedItems, error: itemsError } = await supabase
+                .from("order_items")
+                .insert(orderItems)
+                .select();
+
+              if (itemsError) {
+                console.error("Error creating order items:", itemsError);
+              } else {
+                console.log(
+                  `Successfully created ${insertedItems?.length || 0} order items:`,
+                  insertedItems,
+                );
+              }
+            } catch (parseError) {
+              console.error("Error parsing products data:", parseError);
+            }
           }
         } else {
-          console.log(
-            "No line items available in webhook, cannot create order items",
-          );
+          console.log("Updating existing order:", existingOrder.id);
+
+          // Update the existing order to completed status
+          const { data: updatedOrder, error: updateError } = await supabase
+            .from("orders")
+            .update({
+              delivery_status: "completed",
+              payment_status: "paid",
+              payment_intent_id: session.payment_intent,
+              updated_at: new Date().toISOString(),
+            })
+            .eq("id", existingOrder.id)
+            .select();
+
+          if (updateError) {
+            console.error("Error updating order:", updateError);
+          } else {
+            console.log(
+              "Order updated successfully to completed status:",
+              updatedOrder,
+            );
+          }
+
+          // Check if order items already exist
+          const { data: existingItems, error: itemsCheckError } = await supabase
+            .from("order_items")
+            .select("*")
+            .eq("order_id", existingOrder.id);
+
+          if (itemsCheckError) {
+            console.error(
+              "Error checking existing order items:",
+              itemsCheckError,
+            );
+          } else if (!existingItems || existingItems.length === 0) {
+            console.log("No existing order items found, creating them");
+
+            // Create order items if they don't exist and products data is available
+            if (productsData) {
+              try {
+                const products = JSON.parse(productsData);
+                console.log("Parsed products for existing order:", products);
+
+                const orderItems = products.map((product) => ({
+                  order_id: existingOrder.id,
+                  product_id: product.id,
+                  quantity: Number(product.quantity) || 1,
+                  price: Number(product.price) || 0,
+                  subtotal:
+                    (Number(product.price) || 0) *
+                    (Number(product.quantity) || 1),
+                  created_at: new Date().toISOString(),
+                }));
+
+                const { data: insertedItems, error: itemsError } =
+                  await supabase
+                    .from("order_items")
+                    .insert(orderItems)
+                    .select();
+
+                if (itemsError) {
+                  console.error(
+                    "Error creating order items for existing order:",
+                    itemsError,
+                  );
+                } else {
+                  console.log(
+                    `Successfully created ${insertedItems?.length || 0} order items for existing order:`,
+                    insertedItems,
+                  );
+                }
+              } catch (parseError) {
+                console.error(
+                  "Error parsing products data for existing order:",
+                  parseError,
+                );
+              }
+            }
+          } else {
+            console.log("Order items already exist:", existingItems.length);
+          }
         }
       } catch (dbError) {
         console.error("Database error:", dbError);

@@ -1,33 +1,27 @@
 import { supabase } from "@/lib/supabase";
 
-interface OrderItem {
-  id?: string;
+export interface OrderItem {
   product_id: string;
   quantity: number;
   price: number;
+  name?: string;
 }
 
-interface DeliveryAddress {
-  street: string;
-  city: string;
-  state: string;
-  zipCode: string;
-}
-
-interface OrderData {
+export interface OrderData {
   user_id: string;
+  delivery_address: string;
+  delivery_date: string;
   total_amount: number;
-  payment_method: string;
-  delivery_address: DeliveryAddress;
-  delivery_date?: Date;
-  notes?: string;
   items: OrderItem[];
+  payment_status?: string;
+  delivery_status?: string;
+  notes?: string;
 }
 
 /**
- * Create a new order in the database
+ * Create a new order with all related items
  */
-export const createOrder = async (orderData: OrderData): Promise<string> => {
+export async function createOrder(orderData: OrderData): Promise<string> {
   try {
     // First, create the order record
     const { data: orderRecord, error: orderError } = await supabase
@@ -35,13 +29,14 @@ export const createOrder = async (orderData: OrderData): Promise<string> => {
       .insert([
         {
           user_id: orderData.user_id,
-          total_amount: orderData.total_amount,
-          payment_method: orderData.payment_method,
           delivery_address: orderData.delivery_address,
           delivery_date: orderData.delivery_date,
+          total_amount: orderData.total_amount,
+          payment_status: orderData.payment_status || "pending",
+          delivery_status: orderData.delivery_status || "processing",
           notes: orderData.notes,
-          payment_status: "paid", // Assuming payment is processed before this call
-          delivery_status: "processing",
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
         },
       ])
       .select()
@@ -62,6 +57,8 @@ export const createOrder = async (orderData: OrderData): Promise<string> => {
       product_id: item.product_id,
       quantity: item.quantity,
       price: item.price,
+      subtotal: item.price * item.quantity,
+      created_at: new Date().toISOString(),
     }));
 
     const { error: itemsError } = await supabase
@@ -80,12 +77,12 @@ export const createOrder = async (orderData: OrderData): Promise<string> => {
     console.error("Error in createOrder:", error);
     throw error;
   }
-};
+}
 
 /**
  * Get order details by ID
  */
-export const getOrderById = async (orderId: string) => {
+export async function getOrderById(orderId: string) {
   try {
     const { data: order, error: orderError } = await supabase
       .from("orders")
@@ -99,14 +96,7 @@ export const getOrderById = async (orderId: string) => {
 
     const { data: orderItems, error: itemsError } = await supabase
       .from("order_items")
-      .select(
-        `
-        id,
-        quantity,
-        price,
-        products (id, title, image_url)
-      `,
-      )
+      .select("*, products:product_id (id, name, image_url)")
       .eq("order_id", orderId);
 
     if (itemsError) {
@@ -115,202 +105,39 @@ export const getOrderById = async (orderId: string) => {
 
     return {
       ...order,
-      items: orderItems,
+      items: orderItems || [],
     };
   } catch (error) {
     console.error("Error in getOrderById:", error);
     throw error;
   }
-};
+}
 
 /**
  * Update order status
  */
-export const updateOrderStatus = async (
+export async function updateOrderStatus(
   orderId: string,
   status: string,
-): Promise<void> => {
+  type: "payment" | "delivery" = "delivery",
+): Promise<void> {
   try {
+    const updateField =
+      type === "payment" ? "payment_status" : "delivery_status";
+
     const { error } = await supabase
       .from("orders")
-      .update({ delivery_status: status })
+      .update({
+        [updateField]: status,
+        updated_at: new Date().toISOString(),
+      })
       .eq("id", orderId);
 
     if (error) {
       throw new Error(`Failed to update order status: ${error.message}`);
     }
   } catch (error) {
-    console.error("Error in updateOrderStatus:", error);
+    console.error(`Error updating ${type} status:`, error);
     throw error;
   }
-};
-
-export const signup = async (data: SignupData): Promise<User> => {
-  console.log("Signing up user:", data.email);
-
-  try {
-    // First, create the auth user
-    const { data: authData, error: authError } = await supabase.auth.signUp({
-      email: data.email,
-      password: data.password,
-      options: {
-        data: {
-          first_name: data.firstName,
-          last_name: data.lastName,
-        },
-      },
-    });
-
-    if (authError) {
-      console.error("Auth signup error:", authError);
-      throw new Error(authError.message);
-    }
-
-    if (!authData.user) {
-      throw new Error("No user returned from authentication");
-    }
-
-    console.log("Auth user created:", authData.user.id);
-
-    // Now, explicitly create a profile in the users table
-    const { error: profileError } = await supabase.from("users").insert([
-      {
-        id: authData.user.id,
-        email: data.email,
-        first_name: data.firstName,
-        last_name: data.lastName,
-        phone: data.phone || "",
-        address: data.address || "",
-        role: "user",
-      },
-    ]);
-
-    if (profileError) {
-      console.error("Profile creation error:", profileError);
-      // If profile creation fails, we should ideally clean up the auth user
-      // but this requires admin privileges
-      throw new Error("Failed to create user profile: " + profileError.message);
-    }
-
-    console.log("User profile created successfully");
-
-    // Create user object to return
-    const user = {
-      id: authData.user.id,
-      email: data.email,
-      firstName: data.firstName,
-      lastName: data.lastName,
-      address: data.address || "",
-      phone: data.phone || "",
-      createdAt: new Date(),
-      role: "user",
-    };
-
-    // Store in localStorage
-    localStorage.setItem("currentUser", JSON.stringify(user));
-
-    return user;
-  } catch (error) {
-    console.error("Signup process failed:", error);
-    throw error;
-  }
-};
-
-export const login = async (credentials: LoginCredentials): Promise<User> => {
-  try {
-    console.log("Login attempt:", credentials.email);
-
-    // First authenticate with Supabase Auth
-    const { data: authData, error: authError } =
-      await supabase.auth.signInWithPassword({
-        email: credentials.email,
-        password: credentials.password,
-      });
-
-    if (authError) {
-      console.error("Auth error:", authError);
-      throw new Error(authError.message);
-    }
-
-    if (!authData.user) {
-      throw new Error("No user returned from authentication");
-    }
-
-    console.log("Auth successful, user ID:", authData.user.id);
-
-    // Then try to get the user profile
-    const { data: userData, error: userError } = await supabase
-      .from("users")
-      .select("*")
-      .eq("id", authData.user.id)
-      .single();
-
-    if (userError) {
-      console.error("Error fetching user profile:", userError);
-
-      // Create a user record if one doesn't exist
-      console.log("Creating missing user profile");
-      const { error: insertError } = await supabase.from("users").insert([
-        {
-          id: authData.user.id,
-          email: authData.user.email,
-          first_name: authData.user.user_metadata?.first_name || "User",
-          last_name: authData.user.user_metadata?.last_name || "",
-          role: "user",
-        },
-      ]);
-
-      if (insertError) {
-        console.error("Failed to create user profile:", insertError);
-        throw new Error("Failed to create user profile");
-      }
-
-      // Try to fetch the profile again
-      const { data: newUserData, error: newFetchError } = await supabase
-        .from("users")
-        .select("*")
-        .eq("id", authData.user.id)
-        .single();
-
-      if (newFetchError || !newUserData) {
-        throw new Error("Failed to fetch user profile");
-      }
-
-      // Use the newly created profile
-      return {
-        id: newUserData.id,
-        email: newUserData.email,
-        firstName: newUserData.first_name,
-        lastName: newUserData.last_name,
-        address: newUserData.address || "",
-        phone: newUserData.phone || "",
-        createdAt: new Date(newUserData.created_at),
-        role: newUserData.role,
-      };
-    }
-
-    if (!userData) {
-      throw new Error("User profile not found");
-    }
-
-    // Create and return the user object
-    const user = {
-      id: userData.id,
-      email: userData.email,
-      firstName: userData.first_name,
-      lastName: userData.last_name,
-      address: userData.address || "",
-      phone: userData.phone || "",
-      createdAt: new Date(userData.created_at),
-      role: userData.role,
-    };
-
-    // Store in localStorage
-    localStorage.setItem("currentUser", JSON.stringify(user));
-
-    return user;
-  } catch (err) {
-    console.error("Login error:", err);
-    throw err;
-  }
-};
+}
